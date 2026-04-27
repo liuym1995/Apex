@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 MIGRATIONS_DIR="$REPO_ROOT/infra/migrations"
 
-echo "=== Apex libSQL/Turso Bootstrap ==="
+echo "=== Company Brain libSQL/Turso Bootstrap ==="
 
 DATABASE_URL="${DATABASE_URL:-http://127.0.0.1:8080}"
 DATABASE_AUTH_TOKEN="${DATABASE_AUTH_TOKEN:-}"

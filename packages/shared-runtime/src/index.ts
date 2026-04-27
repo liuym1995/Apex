@@ -1,6 +1,12 @@
 import { log } from "@apex/shared-observability";
 import { store } from "@apex/shared-state";
 import { requireTask, recordAudit, touchTask, mirrorTaskContract, tokenizeForLearning, getExecutionTemplateKey, getLearningTokens, buildLearningFingerprint } from "./core.js";
+import { createAcceptanceReview, issueAcceptanceVerdict } from "./acceptance-agent.js";
+import { createDispatchLeaseForDelegation, releaseDispatchLeaseForSession, createWorkerSessionWithOwnership } from "./delegated-runtime-hardening.js";
+import { getDispatchPlanForTask, createDispatchPlan, activatePlan } from "./dispatch-plan-leasing.js";
+import { getBudgetPolicyForTask, initializeBudgetStatus } from "./task-budget.js";
+import { gatherRoutingSignals, recommendMemoryMode, evaluateTTTEligibility, executeTTTAdaptationRun, distillTTTAdaptation } from "./hybrid-memory-ttt.js";
+import { collectEvolutionSignals, generateEvolutionCandidatesFromSignals, gateAllPendingCandidates, createSkillEvolutionRun, addEvolutionCandidate, recordEvolutionPromotionDecision, runEvolutionCycle } from "./evolution-runtime.js";
 export { requireTask, recordAudit, touchTask, mirrorTaskContract };
 export { buildSandboxFileSystemRules, buildSandboxNetworkRules, buildSandboxResourceLimits, validateSandboxExecution, executeInSandbox, executeInSandboxAsync, killSandboxProcess, listActiveSandboxProcesses, getSandboxExecutionReport, validateFilesystemMounts } from "./sandbox-executor.js";
 export type { SandboxTier, SandboxExecutionResult, SandboxViolation, SandboxFileSystemRule, SandboxNetworkRule, SandboxResourceLimit, SandboxResourceUsage, SandboxProcessHandle } from "./sandbox-executor.js";
@@ -28,8 +34,8 @@ export { registerMCPCapability, unregisterMCPCapability, getMCPCapability, listM
 export type { MCPCapabilitySpec, MCPToolSpec, MCPInvocationRequest, MCPInvocationResult, MCPLiveExecutionFabric, MCPHealthCheckResult, MCPResourceTemplate, MCPPromptTemplate, MCPRootSpec, MCPSessionAuthorization, MCPProgressEvent, MCPCapabilityNegotiation } from "./mcp-execution-fabric.js";
 export { registerAppControlSkill, getAppControlSkill, listAppControlSkills, resolveAppControlSkill, planAppControlExecution, executeAppControlPlan, getAppControlExecutionPlan, getAppControlExecutionResult, registerBuiltinAppControlSkills } from "./app-control-skills.js";
 export type { AppControlSkill, AppControlExecutionPlan, AppControlExecutionStep, AppControlExecutionResult, AppControlExecutionMethod, AppControlRiskTier } from "./app-control-skills.js";
-export { createDesktopWorkspace, getDesktopWorkspace, addWorkspacePanel, updateWorkspacePanel, buildComputerUsePanelState, buildReplayVisualizationState, buildHumanTakeoverConsoleState, buildRiskRecoveryState, recordExecutionStateTransition, getExecutionStateTimeline, buildFullWorkspaceState, buildHybridMemoryTTTPanelState, buildBlockerDashboardPanelState, buildPrivilegedExecutionPanelState, buildReadinessMatrixPanelState } from "./desktop-workspace.js";
-export type { WorkspacePanelKind, WorkspacePanelStatus, WorkspacePanel, ComputerUsePanelState, ReplayVisualizationState, HumanTakeoverConsoleState, RiskRecoveryState, ExecutionStateTransition, DesktopWorkspaceState, HybridMemoryTTTPanelState, BlockerDashboardPanelState, PrivilegedExecutionPanelState, ReadinessMatrixPanelState } from "./desktop-workspace.js";
+export { createDesktopWorkspace, getDesktopWorkspace, addWorkspacePanel, updateWorkspacePanel, buildComputerUsePanelState, buildReplayVisualizationState, buildHumanTakeoverConsoleState, buildRiskRecoveryState, recordExecutionStateTransition, getExecutionStateTimeline, buildFullWorkspaceState, buildHybridMemoryTTTPanelState, buildBlockerDashboardPanelState, buildPrivilegedExecutionPanelState, buildReadinessMatrixPanelState, buildEvolutionStatusPanelState, buildRemoteSkillReviewPanelState } from "./desktop-workspace.js";
+export type { WorkspacePanelKind, WorkspacePanelStatus, WorkspacePanel, ComputerUsePanelState, ReplayVisualizationState, HumanTakeoverConsoleState, RiskRecoveryState, ExecutionStateTransition, DesktopWorkspaceState, HybridMemoryTTTPanelState, BlockerDashboardPanelState, PrivilegedExecutionPanelState, ReadinessMatrixPanelState, EvolutionStatusPanelState, RemoteSkillReviewPanelState } from "./desktop-workspace.js";
 export { recommendMemoryMode, getMemoryStrategyRecommendation, listMemoryStrategyRecommendations, gatherRoutingSignals, evaluateTTTEligibility, getTTTEligibilityGateResult, listTTTEligibilityGateResults, executeTTTAdaptationRun, getTTTAdaptationRun, listTTTAdaptationRuns, rollbackTTTAdaptation, distillTTTAdaptation, getTTTDistillationRecord, listTTTDistillationRecords, getTTTBudgetLedger, setTTTBudgetTotal, resetTTTBudgetLedger, getTTTTraceForTask, getTTTVisibilitySummary, isVendorHostedModel, isTTTEligibleTaskFamily, registerTTTEligibleTaskFamily, unregisterTTTEligibleTaskFamily, listTTTEligibleTaskFamilies, registerTTTModelAdapter, unregisterTTTModelAdapter, listTTTModelAdapters, resolveTTTModelAdapter, registerBuiltinTTTModelAdapters, executeAdaptationWithAdapter, scoreMemoryRoutingCandidates, computeMemoryHitQuality, rerankMemoryDirectory, linkPlaybookToRouting, runTTTRegressionTestSuite, getTTTRegressionTestCases, replayTTTAdaptationForComparison } from "./hybrid-memory-ttt.js";
 export { captureScreen, buildAccessibilityTree, perceiveScreen, executeInputAction, executeElementAction, resolveElementAction, createComputerUseSession, getComputerUseSession, listComputerUseSessions, pauseComputerUseSession, resumeComputerUseSession, stopComputerUseSession, completeComputerUseSession, initiateHumanTakeover, resolveHumanTakeover, listHumanTakeovers, runSeeActVerifyRecoverLoop, listComputerUseSteps, getComputerUseStep, buildComputerUseReplayPackage, replayComputerUseStep, listScreenCaptures, getScreenCapture, listUIPerceptions, getUIPerception, listInputActions, getInputAction, resetCircuitBreakers, getCircuitBreakerStatus, registerOCRProvider, listOCRProviders, clearOCRProviders, registerElementActionProvider, listElementActionProviders, clearElementActionProviders, invokeLocalApp, getLocalAppInvocation, listLocalAppInvocations, generateSessionRecording, exportSessionRecording, buildMacOSAccessibilityTree, buildLinuxAccessibilityTree, listAvailableDisplays, runComputerUseSelfCheck, detectPlatformFeatures, startSessionFrameRecording, captureRecordingFrame, stopSessionFrameRecording, getSessionFrameRecordingStatus, buildSessionRecordingArtifact, detectLocalAppCapabilities, checkLocalAppAvailability, detectBrowserEngineAvailability, encodeSessionRecording, registerVideoEncoder, listVideoEncoders, runMacOSAccessibilityDiagnostics, runLinuxATSPIDiagnostics, enforceComputerUseSandbox, getComputerUseSandboxPolicy, runSmokeTestSuite, runE2EScenario, runRegressionTestSuite, getRegressionTestCases } from "./computer-use-runtime.js";
 export type { OCRProvider, OCRResult, OCRRegion, ElementActionProvider, ElementActionResult, ElementPostCheckResult, SessionRecordingEntry, AvailableDisplay, SelfCheckResult, SelfCheckEntry, PlatformFeatureDetection, SessionRecordingFrame, SessionRecordingTimeline, LocalAppCapability, VideoEncoderResult, VideoEncoder, MacOSAccessibilityDiagnostics, LinuxATSPIDiagnostics, SmokeTestResult, SmokeTestSuiteResult, E2EScenarioStep, E2EScenarioResult, RegressionTestCase, RegressionTestResult, ComputerUseSandboxEnforcement } from "./computer-use-runtime.js";
@@ -61,6 +67,21 @@ export { validateCurrentHost, generateCrossPlatformValidationReport } from "./ho
 export type { HostPlatform, HostValidationStatus, HostValidationResult, CrossPlatformValidationReport } from "./host-validation-activation.js";
 export { runFinalProductionHonestyPass } from "./production-honesty-pass.js";
 export type { ProductionReadinessLevel, ProductionHonestyAssessment } from "./production-honesty-pass.js";
+export { getDefaultDelegationPolicy, loadDelegationPolicy, updateDelegationPolicy, detectMachineResources, computeEffectiveDelegationLimits, getDelegationPolicyDiagnostics } from "./delegation-policy.js";
+export type { SubagentResourceMode, DelegationPolicySettings, MachineResourceEnvelope, EffectiveDelegationLimits } from "./delegation-policy.js";
+export { createDispatchPlan, addDispatchStep, assignStepToSubagent, releaseLease, updateStepResult, activatePlan, getDispatchPlan, getDispatchStep, listDispatchStepsForPlan, getDispatchDiagnostics, getDispatchPlanForTask, getActiveLeaseForStep, getDispatchLeaseById, failDispatchStep } from "./dispatch-plan-leasing.js";
+export type { DispatchPlanStatus, DispatchStepStatus, LeaseStatus, AgentDispatchPlan, AgentDispatchStep, SubagentAssignment, AssignmentLease } from "./dispatch-plan-leasing.js";
+export { buildSubagentContextEnvelope, buildSubagentResultEnvelope, getContextEnvelope, getResultEnvelope, getContextEnvelopesForStep, getResultEnvelopesForStep, getContextEnvelopesForTask, getResultEnvelopesForTask } from "./subagent-envelopes.js";
+export type { SubagentContextEnvelope, SubagentResultEnvelope } from "./subagent-envelopes.js";
+export { createDispatchLeaseForDelegation, releaseDispatchLeaseForSession, createWorkerSessionWithOwnership, heartbeatWorkerSessionWithMetadata, detectOrphanedSessions, detectStalledSessions, superviseAndRestartSession, completeSupervisedRestart, prepareDelegatedResumePackage, applyDelegatedResumePackage, failDelegatedResumePackage, rollbackDelegatedResumePackage, listDelegatedResumePackages, getDelegatedResumePackage, recoverFromCheckpointForSession, releaseLeaseWithCleanup, forceCleanupForTask, linkAttemptToWorkerSession, getAttemptWorkerSessionChain, runDelegatedRuntimeMaintenanceCycle, getWorkerSupervisionEvents, getWorkerSessionDiagnostics } from "./delegated-runtime-hardening.js";
+export type { DispatchLeaseContext } from "./delegated-runtime-hardening.js";
+export { createAcceptanceReview, issueAcceptanceVerdict, getAcceptanceReview, getAcceptanceVerdict, listAcceptanceReviewsForTask, listAcceptanceVerdictsForTask, getCompletionPathStatus } from "./acceptance-agent.js";
+export type { AcceptanceVerdictKind, AcceptanceFinding, AcceptanceReview, AcceptanceVerdict } from "./acceptance-agent.js";
+export { registerModelPricing, initializeDefaultPricingRegistry, lookupModelPricing, listModelPricing, createBudgetPolicy, getBudgetPolicy, getBudgetPolicyForTask, initializeBudgetStatus, trackModelSpend, resolveBudgetInterruption, getBudgetStatusForTask, getPendingInterruptionForTask, getInterruptionEvent, getBudgetDiagnostics } from "./task-budget.js";
+export type { BudgetMode, OnLimitReached, ModelPricingRegistryEntry, TaskBudgetPolicy, TaskBudgetStatus, BudgetInterruptionEvent } from "./task-budget.js";
+export { createSkillEvolutionRun, createPromptEvolutionRun, createToolDescriptionEvolutionRun, addEvolutionCandidate, updateEvolutionCandidateStatus, recordEvolutionPromotionDecision, recordEvolutionRollback, getEvolutionRunStatus, listEvolutionRunsForTarget, getEvolutionDiagnostics, collectEvolutionSignals, generateEvolutionCandidatesFromSignals, gateEvolutionCandidate, gateAllPendingCandidates, runEvolutionCycle } from "./evolution-runtime.js";
+export type { EvolutionSignal, EvolutionGateResult } from "./evolution-runtime.js";
+export { createClawHubRegistryConfig, getClawHubRegistryConfig, listClawHubRegistryConfigs, searchClawHubSkills, inspectClawHubSkill, installClawHubSkill, listClawHubInstallRecords, publishToClawHub, listClawHubPublishRecords, syncClawHubRegistry, listClawHubSyncRecords, assessRemoteSkillTrust, listRemoteSkillTrustVerdicts, getClawHubDiagnostics } from "./clawhub-registry-adapter.js";
 export type { ScreenCapture, UIPerception, InputAction, ComputerUseStep, ComputerUseSession, HumanTakeover, ComputerUseReplayStep } from "@apex/shared-types";
 export type { LocalAppInvocation } from "@apex/shared-state";
 import {
@@ -1095,7 +1116,6 @@ export function createExecutionPlan(taskId: string): TaskContract {
   }
 
   try {
-    const { gatherRoutingSignals, recommendMemoryMode, evaluateTTTEligibility } = require("./hybrid-memory-ttt.js") as typeof import("./hybrid-memory-ttt.js");
     const memoryItems = Array.from(store.memoryItems.values()).filter(m => m.task_id === taskId);
     const reuseConfidence = memoryItems.length > 0
       ? memoryItems.filter(m => m.kind === "methodology" || m.kind === "evaluation").length / Math.max(memoryItems.length, 1)
@@ -2060,6 +2080,12 @@ export function advanceLearningFactoryStage(pipelineId: string, stageResult?: Re
     pipeline.updated_at = now;
     store.learningFactoryPipelines.set(pipeline.pipeline_id, pipeline);
     recordAudit("learning_factory.pipeline_completed", { pipeline_id: pipelineId, promoted_artifact_id: pipeline.promoted_artifact_id });
+    try {
+      const signals = collectEvolutionSignals();
+      if (signals.length > 0) {
+        generateEvolutionCandidatesFromSignals(signals);
+      }
+    } catch {}
     return pipeline;
   }
   const nextStageIndex = currentStageIndex + 1;
@@ -2097,6 +2123,14 @@ export function failLearningFactoryStage(pipelineId: string, error: string): Lea
   pipeline.updated_at = now;
   store.learningFactoryPipelines.set(pipeline.pipeline_id, pipeline);
   recordAudit("learning_factory.stage_failed", { pipeline_id: pipelineId, stage: pipeline.current_stage, error });
+
+  try {
+    const signals = collectEvolutionSignals();
+    if (signals.length > 0) {
+      generateEvolutionCandidatesFromSignals(signals);
+    }
+  } catch {}
+
   return pipeline;
 }
 
@@ -7298,6 +7332,21 @@ function buildTaskAgentTeamState(taskId: string) {
   const now = nowIso();
   const subagentCheckpoints = [];
 
+  let dispatchPlanId: string | undefined;
+  if (mode === "delegated_team") {
+    try {
+      let existingPlan = getDispatchPlanForTask(taskId);
+      if (!existingPlan) {
+        existingPlan = createDispatchPlan({
+          task_id: taskId,
+          supervisor_agent_id: `subagent_${taskId}_supervisor`
+        });
+        activatePlan(existingPlan.plan_id);
+      }
+      dispatchPlanId = existingPlan.plan_id;
+    } catch {}
+  }
+
   const sessions = [
     upsertSubagentSession(taskId, {
       subagent_session_id: `subagent_${taskId}_supervisor`,
@@ -7428,6 +7477,7 @@ function buildTaskAgentTeamState(taskId: string) {
       completed_at: mainWorkerRun.completed_at
     })
   );
+
   messages.push(
     upsertSubagentMessage(taskId, {
       message_id: `submsg_${taskId}_execution_assignment`,
@@ -7638,6 +7688,7 @@ function buildTaskAgentTeamState(taskId: string) {
     message_count: messages.length,
     isolated_context_count: new Set(updatedSessions.map(session => session.isolated_context_key)).size,
     checkpoint_count: subagentCheckpoints.length,
+    dispatch_plan_id: dispatchPlanId,
     future_upgrade_path: "Promote supervisor and delegated sessions into independently resumable subagent runtimes as Runtime Hardening Phase 5 continues.",
     created_at: store.agentTeams.get(teamId)?.created_at ?? now,
     updated_at: now
@@ -10781,6 +10832,12 @@ export function runTaskEndToEnd(taskId: string): {
   startTaskRun(taskRun.run_id);
   const taskAttempt = createTaskAttempt({ run_id: taskRun.run_id, task_id: taskId });
   startTaskAttempt(taskAttempt.attempt_id);
+
+  try {
+    const policy = getBudgetPolicyForTask(taskId);
+    initializeBudgetStatus(taskId, policy?.policy_id ?? "default");
+  } catch {}
+
   appendEvent({ kind: "execution_started", aggregate_type: "task", aggregate_id: taskId });
 
   const planStep = createExecutionStep({ task_id: taskId, run_id: taskRun.run_id, attempt_id: taskAttempt.attempt_id, kind: "planning", label: "Create execution plan" });
@@ -10797,9 +10854,39 @@ export function runTaskEndToEnd(taskId: string): {
 
   const execStep = createExecutionStep({ task_id: taskId, run_id: taskRun.run_id, attempt_id: taskAttempt.attempt_id, kind: "execution", label: "Execute task" });
   startExecutionStep(execStep.step_id);
+
+  let dispatchLeaseContext: import("./delegated-runtime-hardening.js").DispatchLeaseContext | undefined;
+  let executionSession: import("@apex/shared-types").WorkerSession | undefined;
+  try {
+    const leaseResult = createDispatchLeaseForDelegation({
+      task_id: taskId,
+      supervisor_agent_id: `subagent_${taskId}_supervisor`,
+      step_goal: `Execute primary worker run for task: ${requireTask(taskId).intent}`,
+      subagent_id: `subagent_${taskId}_execution_worker`
+    });
+    if (!("error" in leaseResult)) {
+      dispatchLeaseContext = leaseResult;
+      executionSession = createWorkerSessionWithOwnership({
+        worker_id: `subagent_${taskId}_execution_worker`,
+        task_id: taskId,
+        run_id: taskRun.run_id,
+        attempt_id: taskAttempt.attempt_id,
+        supervision_policy: "restart_on_stall",
+        dispatch_lease_context: leaseResult
+      });
+    }
+  } catch {}
+
   const workerRun = startWorkerRun(taskId);
   executeTask(taskId);
   completeWorkerRun(taskId, `Worker ${workerRun.worker_name} completed task execution.`);
+
+  if (executionSession && dispatchLeaseContext) {
+    try {
+      releaseDispatchLeaseForSession(dispatchLeaseContext.lease.lease_id, "completed");
+    } catch {}
+  }
+
   completeExecutionStep(execStep.step_id);
   appendEvent({ kind: "execution_completed", aggregate_type: "task", aggregate_id: taskId });
 
@@ -10808,7 +10895,6 @@ export function runTaskEndToEnd(taskId: string): {
     const tttStep = createExecutionStep({ task_id: taskId, run_id: taskRun.run_id, attempt_id: taskAttempt.attempt_id, kind: "execution", label: "TTT adaptation run" });
     startExecutionStep(tttStep.step_id);
     try {
-      const { executeTTTAdaptationRun } = require("./hybrid-memory-ttt.js") as typeof import("./hybrid-memory-ttt.js");
       const tttRun = executeTTTAdaptationRun({
         gate_id: taskAfterExec.ttt_eligibility_gate_id,
         task_id: taskId,
@@ -10859,6 +10945,31 @@ export function runTaskEndToEnd(taskId: string): {
   completeExecutionStep(compStep.step_id, { verdict: completionEngineResult.verdict });
   appendEvent({ kind: "completion_engine_evaluated", aggregate_type: "task", aggregate_id: taskId, payload: { verdict: completionEngineResult.verdict } });
 
+  const accStep = createExecutionStep({ task_id: taskId, run_id: taskRun.run_id, attempt_id: taskAttempt.attempt_id, kind: "verification", label: "Acceptance review" });
+  startExecutionStep(accStep.step_id);
+  try {
+    const accReview = createAcceptanceReview({
+      task_id: taskId,
+      reviewer_kind: "acceptance_agent",
+      findings: [],
+      deterministic_passed: checklist.status === "passed" && reconciliation.status === "passed",
+      semantic_verdict: completionEngineResult.verdict === "complete" ? "accepted" : "revise_and_retry",
+      risk_level: (requireTask(taskId).risk_level ?? "medium") as "low" | "medium" | "high" | "critical"
+    });
+    issueAcceptanceVerdict({
+      task_id: taskId,
+      review_id: accReview.review_id,
+      verdict: accReview.semantic_verdict ?? "accepted",
+      rationale: `Deterministic: ${accReview.deterministic_passed ? "passed" : "failed"}, completion: ${completionEngineResult.verdict}`,
+      risk_level: accReview.risk_level
+    });
+    addCheckpoint(taskId, "acceptance_review", `Acceptance verdict: ${accReview.semantic_verdict ?? "accepted"}, deterministic: ${accReview.deterministic_passed}`);
+  } catch {
+    addCheckpoint(taskId, "acceptance_review_skipped", "Acceptance review skipped due to error");
+  }
+  completeExecutionStep(accStep.step_id);
+  appendEvent({ kind: "acceptance_review_completed", aggregate_type: "task", aggregate_id: taskId });
+
   const doneGate = runDoneGate(taskId);
   appendEvent({ kind: "done_gate_evaluated", aggregate_type: "task", aggregate_id: taskId, payload: { status: doneGate.status } });
 
@@ -10869,7 +10980,6 @@ export function runTaskEndToEnd(taskId: string): {
   const taskForDistill = requireTask(taskId);
   if (taskForDistill.ttt_adaptation_run_id) {
     try {
-      const { distillTTTAdaptation } = require("./hybrid-memory-ttt.js") as typeof import("./hybrid-memory-ttt.js");
       distillTTTAdaptation({ adaptation_run_id: taskForDistill.ttt_adaptation_run_id });
       addCheckpoint(taskId, "ttt_distillation", "TTT adaptation results distilled back to durable memory");
     } catch {

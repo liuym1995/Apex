@@ -24,6 +24,8 @@ This file is the canonical master plan for the final product.
 - For deployment guidance, also see `docs/deployment-and-environments.md`.
 - For observability and operations, also see `docs/observability-and-operations.md`.
 - For the phased runtime hardening and improvement roadmap, also see `docs/runtime-improvements-roadmap.md`.
+- For local settings, runtime defaults, and default-directory behavior, also see `docs/local-settings-and-runtime-defaults.md`.
+- For multi-agent governance, acceptance-agent boundaries, and task budget enforcement, also see `docs/multi-agent-governance-and-budgeting.md`.
 
 Important boundary:
 
@@ -163,6 +165,7 @@ Responsibilities:
 - conversation UI
 - approvals and notifications
 - settings and permissions UI
+- runtime defaults and budget-control UI
 - artifact viewing
 - task control actions
 
@@ -179,6 +182,7 @@ Responsibilities:
 - maintain local task state
 - route local tool calls
 - manage local workers
+- derive effective runtime defaults from local settings
 - own stop, resume, retry, and checkpoint behavior
 - cache local audit and state when offline
 - mediate between UI and cloud services
@@ -205,6 +209,7 @@ Responsibilities:
 - produce artifacts
 - emit checkpoints and telemetry
 - obey permissions and interruption rules
+- obey supervisor-issued context envelopes, task budgets, and delegation limits
 
 Recommended worker types:
 
@@ -232,8 +237,8 @@ Responsibilities:
 Responsibilities:
 
 - checklist evaluation
+- acceptance-agent semantic review
 - reconciliation with real-world state
-- verifier agent review
 - final done gate
 - methodology extraction
 - playbook evaluation and promotion

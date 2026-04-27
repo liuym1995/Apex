@@ -16,6 +16,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@apex/shared-config": "0.1.0",
     "@apex/shared-types": "0.1.0"
   }
 }

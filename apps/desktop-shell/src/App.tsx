@@ -98,6 +98,60 @@ type InboxSummary = {
   };
 };
 
+type LocalAppSettingsField = {
+  key: "workspace_root" | "default_output_dir" | "default_task_workdir" | "default_write_root" | "default_export_dir" | "artifact_dir" | "export_dir" | "verification_evidence_dir" | "task_run_dir" | "local_dev_root";
+  label: string;
+  description: string;
+  value: string;
+  default_value: string;
+  required: boolean;
+  editable: boolean;
+  restart_required: boolean;
+  status: "ready" | "invalid" | "attention";
+  message?: string;
+};
+
+type LocalAppSettingsStatus = {
+  first_run: boolean;
+  requires_attention: boolean;
+  missing_required: string[];
+  restart_required_fields: string[];
+  settings_path: string;
+  effective: {
+    workspace_root: string;
+    default_output_dir: string;
+    default_task_workdir: string;
+    default_write_root: string;
+    default_export_dir: string;
+    artifact_dir: string;
+    export_dir: string;
+    verification_evidence_dir: string;
+    task_run_dir: string;
+    local_dev_root: string;
+    local_db_path: string;
+    install_completed: boolean;
+  };
+  defaults: {
+    workspace_root: string;
+    default_output_dir: string;
+    default_task_workdir: string;
+    default_write_root: string;
+    default_export_dir: string;
+    artifact_dir: string;
+    export_dir: string;
+    verification_evidence_dir: string;
+    task_run_dir: string;
+    local_dev_root: string;
+    local_db_path: string;
+  };
+  runtime: {
+    state_backend_path: string;
+    local_db_parent_status: string;
+    local_db_parent_message: string;
+  };
+  fields: LocalAppSettingsField[];
+};
+
 type InboxItem = {
   inbox_id: string;
   kind: "policy_follow_up" | "task_attention" | "governance_alert";
@@ -1593,9 +1647,34 @@ const [canonicalSkills, setCanonicalSkills] = useState<CanonicalSkillEntry[]>([]
   const [browserUrl, setBrowserUrl] = useState("data:text/html,<html><head><title>Local QA Snapshot</title></head><body>Snapshot a page for validation.</body></html>");
   const [browserSessionUrl, setBrowserSessionUrl] = useState("data:text/html,<html><head><title>Follow-up Snapshot</title></head><body>Follow-up navigation step.</body></html>");
   const [rollbackPath, setRollbackPath] = useState("workspace-output.txt");
+  const [settingsStatus, setSettingsStatus] = useState<LocalAppSettingsStatus | null>(null);
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [settingsSaveMessage, setSettingsSaveMessage] = useState<string | null>(null);
+  const [settingsForm, setSettingsForm] = useState({
+    workspace_root: "",
+    default_output_dir: "",
+    default_task_workdir: "",
+    default_write_root: "",
+    default_export_dir: "",
+    artifact_dir: "",
+    export_dir: "",
+    verification_evidence_dir: "",
+    task_run_dir: "",
+    local_dev_root: ""
+  });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [delegationPolicyData, setDelegationPolicyData] = useState<{
+    policy: { subagent_resource_mode: string; cpu_reserve_ratio: number; memory_reserve_ratio: number; max_parallel_subagents: number; max_total_subagents_per_task: number; max_delegation_depth: number };
+    limits: { effective_max_parallel: number; effective_max_total_per_task: number; effective_max_depth: number; clamped_by: string };
+    machine: { logical_cpu_cores: number; available_memory_mb: number };
+  } | null>(null);
+  const [budgetPolicyData, setBudgetPolicyData] = useState<{
+    policy: { hard_limit_amount: number; warning_threshold_pct: number; on_limit_reached: string };
+    pricing: Array<{ model_id: string; input_cost_per_1k: number; output_cost_per_1k: number }>;
+  } | null>(null);
+  const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
   const inboxPanelRef = useRef<HTMLElement | null>(null);
   const policyFollowUpsRef = useRef<HTMLParagraphElement | null>(null);
   const policyProposalQueuesRef = useRef<HTMLParagraphElement | null>(null);
@@ -1614,6 +1693,155 @@ const [canonicalSkills, setCanonicalSkills] = useState<CanonicalSkillEntry[]>([]
       setControlPlaneState("unavailable");
       setLastHealthCheckAt(new Date().toISOString());
       return null;
+    }
+  }
+
+  async function loadLocalAppSettingsStatus(options: { openModalIfNeeded?: boolean } = {}) {
+    const { openModalIfNeeded = false } = options;
+    try {
+      const status = await fetchJson<LocalAppSettingsStatus>("/api/local/settings/status");
+      setSettingsStatus(status);
+      setSettingsForm({
+        workspace_root: status.effective.workspace_root,
+        default_output_dir: status.effective.default_output_dir,
+        default_task_workdir: status.effective.default_task_workdir,
+        default_write_root: status.effective.default_write_root,
+        default_export_dir: status.effective.default_export_dir,
+        artifact_dir: status.effective.artifact_dir,
+        export_dir: status.effective.export_dir,
+        verification_evidence_dir: status.effective.verification_evidence_dir,
+        task_run_dir: status.effective.task_run_dir,
+        local_dev_root: status.effective.local_dev_root
+      });
+      setSettingsSaveMessage(null);
+      if (openModalIfNeeded && (status.first_run || status.missing_required.length > 0)) {
+        setSettingsModalOpen(true);
+      }
+      return status;
+    } catch (cause) {
+      setSettingsStatus(null);
+      if (openModalIfNeeded) {
+        setError((cause as Error).message);
+      }
+      return null;
+    }
+  }
+
+  function applyRecommendedLocalSettings() {
+    if (!settingsStatus) return;
+    setSettingsForm({
+      workspace_root: settingsStatus.defaults.workspace_root,
+      default_output_dir: settingsStatus.defaults.default_output_dir,
+      default_task_workdir: settingsStatus.defaults.default_task_workdir,
+      default_write_root: settingsStatus.defaults.default_write_root,
+      default_export_dir: settingsStatus.defaults.default_export_dir,
+      artifact_dir: settingsStatus.defaults.artifact_dir,
+      export_dir: settingsStatus.defaults.export_dir,
+      verification_evidence_dir: settingsStatus.defaults.verification_evidence_dir,
+      task_run_dir: settingsStatus.defaults.task_run_dir,
+      local_dev_root: settingsStatus.defaults.local_dev_root
+    });
+    setSettingsSaveMessage("Recommended defaults have been loaded into the form.");
+  }
+
+  async function saveLocalAppSettings(markInstallCompleted = true) {
+    setBusyAction("save-settings");
+    setError(null);
+    try {
+      const result = await fetchJson<{ status: LocalAppSettingsStatus; message: string }>("/api/local/settings", {
+        method: "POST",
+        body: JSON.stringify({
+          ...settingsForm,
+          install_completed: markInstallCompleted
+        })
+      });
+      setSettingsStatus(result.status);
+      setSettingsForm({
+        workspace_root: result.status.effective.workspace_root,
+        default_output_dir: result.status.effective.default_output_dir,
+        default_task_workdir: result.status.effective.default_task_workdir,
+        default_write_root: result.status.effective.default_write_root,
+        default_export_dir: result.status.effective.default_export_dir,
+        artifact_dir: result.status.effective.artifact_dir,
+        export_dir: result.status.effective.export_dir,
+        verification_evidence_dir: result.status.effective.verification_evidence_dir,
+        task_run_dir: result.status.effective.task_run_dir,
+        local_dev_root: result.status.effective.local_dev_root
+      });
+      setSettingsSaveMessage(result.message);
+      setNotice(
+        result.status.restart_required_fields.length > 0
+          ? "Settings saved. Local runtime root changes take effect after restarting the desktop companion."
+          : "Settings saved."
+      );
+      setSettingsModalOpen(false);
+      await loadLocalAppSettingsStatus();
+      if (RUNTIME_INFO.mode === "tauri") {
+        await refreshDesktopManagerState();
+      }
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function loadDelegationPolicy() {
+    try {
+      const data = await fetchJson<{
+        policy: { subagent_resource_mode: string; cpu_reserve_ratio: number; memory_reserve_ratio: number; max_parallel_subagents: number; max_total_subagents_per_task: number; max_delegation_depth: number };
+        limits: { effective_max_parallel: number; effective_max_total_per_task: number; effective_max_depth: number; clamped_by: string };
+        machine: { logical_cpu_cores: number; available_memory_mb: number };
+      }>("/api/local/settings/delegation-policy");
+      setDelegationPolicyData(data);
+    } catch {
+      setDelegationPolicyData(null);
+    }
+  }
+
+  async function loadBudgetPolicy() {
+    try {
+      const data = await fetchJson<{
+        policy: { hard_limit_amount: number; warning_threshold_pct: number; on_limit_reached: string };
+        pricing: Array<{ model_id: string; input_cost_per_1k: number; output_cost_per_1k: number }>;
+      }>("/api/local/settings/budget-policy");
+      setBudgetPolicyData(data);
+    } catch {
+      setBudgetPolicyData(null);
+    }
+  }
+
+  async function saveDelegationPolicyField(field: string, value: unknown) {
+    setBusyAction("save-delegation-policy");
+    setError(null);
+    try {
+      const result = await fetchJson<{ policy: Record<string, unknown>; message: string }>("/api/local/settings/delegation-policy", {
+        method: "POST",
+        body: JSON.stringify({ [field]: value })
+      });
+      setNotice(result.message);
+      await loadDelegationPolicy();
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function saveBudgetPolicyField(field: string, value: unknown) {
+    setBusyAction("save-budget-policy");
+    setError(null);
+    try {
+      const result = await fetchJson<{ policy: Record<string, unknown>; message: string }>("/api/local/settings/budget-policy", {
+        method: "POST",
+        body: JSON.stringify({ [field]: value })
+      });
+      setNotice(result.message);
+      await loadBudgetPolicy();
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusyAction(null);
     }
   }
 
@@ -1959,6 +2187,7 @@ const [canonicalSkills, setCanonicalSkills] = useState<CanonicalSkillEntry[]>([]
   async function ensureDemo() {
     await fetchJson<{ tasks: TaskSummary[] }>("/api/local/bootstrap-demo", { method: "POST" });
     await loadOverview();
+    await loadLocalAppSettingsStatus({ openModalIfNeeded: true });
   }
 
   useEffect(() => {
@@ -1973,6 +2202,13 @@ const [canonicalSkills, setCanonicalSkills] = useState<CanonicalSkillEntry[]>([]
     if (!selectedTaskId || controlPlaneState !== "connected") return;
     loadWorkspace(selectedTaskId).catch(cause => setError((cause as Error).message));
   }, [selectedTaskId, controlPlaneState]);
+
+  useEffect(() => {
+    if (controlPlaneState !== "connected") return;
+    loadLocalAppSettingsStatus().catch(() => undefined);
+    loadDelegationPolicy();
+    loadBudgetPolicy();
+  }, [controlPlaneState]);
 
   useEffect(() => {
     if (controlPlaneState !== "connected") return;
@@ -2623,6 +2859,8 @@ const [canonicalSkills, setCanonicalSkills] = useState<CanonicalSkillEntry[]>([]
   }, [canonicalSkills]);
 
   const canOperate = controlPlaneState === "connected";
+  const localSettingsAttentionCount = settingsStatus?.fields.filter(field => field.status !== "ready").length ?? 0;
+  const localSettingsMissingRequiredCount = settingsStatus?.missing_required.length ?? 0;
 
   async function handleStartLocalControlPlane() {
     await manageLocalControlPlane("start-local-control-plane", () => startLocalControlPlane(), true);
@@ -4946,6 +5184,7 @@ const [canonicalSkills, setCanonicalSkills] = useState<CanonicalSkillEntry[]>([]
             ) : null}
           </div>
           <div className="actions">
+            <button className="secondary" disabled={!!busyAction} onClick={() => setSettingsModalOpen(true)}>Settings</button>
             <button disabled={!selectedTaskId || !!busyAction || !canOperate} onClick={() => runAction("prepare")}>Prepare</button>
             <button disabled={!selectedTaskId || !!busyAction || !canOperate} onClick={() => runAction("run")}>Run</button>
             <button disabled={!selectedTaskId || !!busyAction || !canOperate} onClick={() => runAction("verify")}>Verify</button>
@@ -4956,6 +5195,205 @@ const [canonicalSkills, setCanonicalSkills] = useState<CanonicalSkillEntry[]>([]
 
         {error ? <div className="error-banner">{error}</div> : null}
         {!error && notice ? <div className="card"><p>{notice}</p></div> : null}
+        {settingsStatus?.requires_attention ? (
+          <section className="card settings-banner">
+            <div className="section-header">
+              <div>
+                <h3>{settingsStatus.first_run ? "Finish Local Setup" : "Settings Need Attention"}</h3>
+                <p className="subtle">
+                  {settingsStatus.first_run
+                    ? "The app has recommended defaults ready. Save them once to complete first-time setup."
+                    : `Detected ${localSettingsAttentionCount} settings item(s) needing review, including ${localSettingsMissingRequiredCount} required item(s).`}
+                </p>
+              </div>
+              <button className="secondary" disabled={!!busyAction} onClick={() => setSettingsModalOpen(true)}>
+                Open Settings
+              </button>
+            </div>
+            <div className="tag-row">
+              {settingsStatus.fields.map(field => (
+                <span key={`settings-chip-${field.key}`} className={`tag-chip settings-chip settings-chip-${field.status}`}>
+                  {field.label}: {field.status}
+                </span>
+              ))}
+            </div>
+            <p className="subtle">settings file: {settingsStatus.settings_path}</p>
+          </section>
+        ) : null}
+        {settingsModalOpen && settingsStatus ? (
+          <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Local app settings">
+            <section className="card settings-modal">
+              <div className="section-header">
+                <div>
+                  <p className="eyebrow">Local Settings</p>
+                  <h3>{settingsStatus.first_run ? "Complete First-Time Setup" : "App Settings"}</h3>
+                </div>
+                <button className="secondary" disabled={!!busyAction} onClick={() => setSettingsModalOpen(false)}>
+                  Close
+                </button>
+              </div>
+              <p className="subtle">
+                Only required settings will block execution. Everything else ships with defaults and can be changed later.
+              </p>
+              <p className="subtle">settings file: {settingsStatus.settings_path}</p>
+              <p className="subtle">state backend: {settingsStatus.runtime.state_backend_path}</p>
+              <div className="settings-form">
+                {settingsStatus.fields.map(field => (
+                  <label key={`settings-field-${field.key}`} className="tool-field">
+                    <span>
+                      {field.label}
+                      {field.required ? " *" : ""}
+                      {field.restart_required ? " / restart after save" : ""}
+                    </span>
+                    <input
+                      value={settingsForm[field.key]}
+                      onChange={event =>
+                        setSettingsForm(previous => ({
+                          ...previous,
+                          [field.key]: event.target.value
+                        }))
+                      }
+                      disabled={!field.editable || !!busyAction}
+                    />
+                    <span className="subtle">{field.description}</span>
+                    <span className="subtle">recommended: {field.default_value}</span>
+                    <span className={`subtle settings-field-status settings-field-status-${field.status}`}>
+                      {field.status}: {field.message ?? "ready"}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              {settingsSaveMessage ? <p className="subtle">{settingsSaveMessage}</p> : null}
+              <div className="advanced-settings-toggle">
+                <button className="secondary" disabled={!!busyAction} onClick={() => setAdvancedSettingsOpen(prev => !prev)}>
+                  {advancedSettingsOpen ? "Hide Advanced Settings" : "Show Advanced Settings"}
+                </button>
+              </div>
+              {advancedSettingsOpen ? (
+                <div className="advanced-settings-section">
+                  <h4>Delegation Policy</h4>
+                  {delegationPolicyData ? (
+                    <div className="settings-form">
+                      <label className="tool-field">
+                        <span>Resource Mode</span>
+                        <select
+                          value={delegationPolicyData.policy.subagent_resource_mode}
+                          onChange={e => saveDelegationPolicyField("subagent_resource_mode", e.target.value)}
+                          disabled={!!busyAction}
+                        >
+                          <option value="auto">auto</option>
+                          <option value="manual">manual</option>
+                        </select>
+                        <span className="subtle">auto = derive limits from machine resources; manual = use configured values</span>
+                      </label>
+                      <label className="tool-field">
+                        <span>CPU Reserve Ratio</span>
+                        <input
+                          type="number" step="0.05" min="0" max="0.8"
+                          value={delegationPolicyData.policy.cpu_reserve_ratio}
+                          onChange={e => saveDelegationPolicyField("cpu_reserve_ratio", Number(e.target.value))}
+                          disabled={!!busyAction}
+                        />
+                        <span className="subtle">Fraction of CPU cores reserved for host (default 0.2)</span>
+                      </label>
+                      <label className="tool-field">
+                        <span>Memory Reserve Ratio</span>
+                        <input
+                          type="number" step="0.05" min="0" max="0.8"
+                          value={delegationPolicyData.policy.memory_reserve_ratio}
+                          onChange={e => saveDelegationPolicyField("memory_reserve_ratio", Number(e.target.value))}
+                          disabled={!!busyAction}
+                        />
+                        <span className="subtle">Fraction of memory reserved for host (default 0.2)</span>
+                      </label>
+                      <label className="tool-field">
+                        <span>Max Parallel Subagents</span>
+                        <input
+                          type="number" step="1" min="1" max="32"
+                          value={delegationPolicyData.policy.max_parallel_subagents}
+                          onChange={e => saveDelegationPolicyField("max_parallel_subagents", Number(e.target.value))}
+                          disabled={!!busyAction}
+                        />
+                        <span className="subtle">Effective: {delegationPolicyData.limits.effective_max_parallel} (clamped by {delegationPolicyData.limits.clamped_by})</span>
+                      </label>
+                      <label className="tool-field">
+                        <span>Max Total Subagents Per Task</span>
+                        <input
+                          type="number" step="1" min="1" max="64"
+                          value={delegationPolicyData.policy.max_total_subagents_per_task}
+                          onChange={e => saveDelegationPolicyField("max_total_subagents_per_task", Number(e.target.value))}
+                          disabled={!!busyAction}
+                        />
+                        <span className="subtle">Effective: {delegationPolicyData.limits.effective_max_total_per_task}</span>
+                      </label>
+                      <label className="tool-field">
+                        <span>Max Delegation Depth</span>
+                        <input
+                          type="number" step="1" min="1" max="4"
+                          value={delegationPolicyData.policy.max_delegation_depth}
+                          onChange={e => saveDelegationPolicyField("max_delegation_depth", Number(e.target.value))}
+                          disabled={!!busyAction}
+                        />
+                        <span className="subtle">Effective: {delegationPolicyData.limits.effective_max_depth}</span>
+                      </label>
+                      <p className="subtle">Machine: {delegationPolicyData.machine.logical_cpu_cores} CPUs, {delegationPolicyData.machine.available_memory_mb} MB RAM</p>
+                    </div>
+                  ) : (
+                    <p className="subtle">Loading delegation policy...</p>
+                  )}
+                  <h4>Budget Policy</h4>
+                  {budgetPolicyData ? (
+                    <div className="settings-form">
+                      <label className="tool-field">
+                        <span>Hard Limit (USD)</span>
+                        <input
+                          type="number" step="0.5" min="0.1"
+                          value={budgetPolicyData.policy.hard_limit_amount}
+                          onChange={e => saveBudgetPolicyField("hard_limit_amount", Number(e.target.value))}
+                          disabled={!!busyAction}
+                        />
+                        <span className="subtle">Task execution pauses when this limit is reached (default $5)</span>
+                      </label>
+                      <label className="tool-field">
+                        <span>Warning Threshold (%)</span>
+                        <input
+                          type="number" step="5" min="10" max="100"
+                          value={budgetPolicyData.policy.warning_threshold_pct}
+                          onChange={e => saveBudgetPolicyField("warning_threshold_pct", Number(e.target.value))}
+                          disabled={!!busyAction}
+                        />
+                        <span className="subtle">Warn when spend reaches this percentage of hard limit (default 80%)</span>
+                      </label>
+                      <label className="tool-field">
+                        <span>On Limit Reached</span>
+                        <select
+                          value={budgetPolicyData.policy.on_limit_reached}
+                          onChange={e => saveBudgetPolicyField("on_limit_reached", e.target.value)}
+                          disabled={!!busyAction}
+                        >
+                          <option value="pause_and_ask">pause_and_ask</option>
+                          <option value="hard_stop">hard_stop</option>
+                        </select>
+                        <span className="subtle">pause_and_ask = pause and wait for user; hard_stop = terminate immediately</span>
+                      </label>
+                      <p className="subtle">Registered models: {budgetPolicyData.pricing.length}</p>
+                    </div>
+                  ) : (
+                    <p className="subtle">Loading budget policy...</p>
+                  )}
+                </div>
+              ) : null}
+              <div className="actions">
+                <button className="secondary" disabled={!!busyAction} onClick={() => applyRecommendedLocalSettings()}>
+                  Use Recommended Defaults
+                </button>
+                <button disabled={!!busyAction} onClick={() => saveLocalAppSettings(true)}>
+                  {settingsStatus.first_run ? "Save and Finish Setup" : "Save Settings"}
+                </button>
+              </div>
+            </section>
+          </div>
+        ) : null}
 
         {!canOperate ? (
           <section className="card">
@@ -5002,6 +5440,12 @@ const [canonicalSkills, setCanonicalSkills] = useState<CanonicalSkillEntry[]>([]
             ) : null}
             {desktopManagerState?.message ? (
               <p className="subtle">{desktopManagerState.message}</p>
+            ) : null}
+            {settingsStatus ? (
+              <>
+                <p className="subtle">settings file: {settingsStatus.settings_path}</p>
+                <p className="subtle">local db: {settingsStatus.effective.local_db_path}</p>
+              </>
             ) : null}
             <p className="subtle">
               auto restart: {desktopManagerState?.auto_restart_enabled ? "enabled" : "disabled"} / attempts{" "}
@@ -6748,6 +7192,25 @@ const [canonicalSkills, setCanonicalSkills] = useState<CanonicalSkillEntry[]>([]
             </section>
           ) : null}
 
+          {selectedTaskId ? (
+            <section className="card">
+              <h3>Acceptance Status</h3>
+              <AcceptanceCard taskId={selectedTaskId} />
+            </section>
+          ) : null}
+
+          {selectedTaskId ? (
+            <section className="card">
+              <h3>Budget Status</h3>
+              <BudgetCard taskId={selectedTaskId} />
+            </section>
+          ) : null}
+
+          <section className="card">
+            <h3>Multi-Agent Limits</h3>
+            <MultiAgentLimitsCard />
+          </section>
+
           <section className="card">
             <h3>Capability Strategy</h3>
             <ul>
@@ -8126,6 +8589,224 @@ const [canonicalSkills, setCanonicalSkills] = useState<CanonicalSkillEntry[]>([]
           </section>
         </div>
       </main>
+    </div>
+  );
+}
+
+function AcceptanceCard(props: { taskId: string }) {
+  const [data, setData] = useState<{
+    has_review: boolean;
+    verdict: string;
+    deterministic_passed: boolean;
+    findings_count: number;
+    critical_findings: number;
+    warning_findings: number;
+    can_proceed: boolean;
+    requires_human_approval: boolean;
+    completion_path: {
+      has_deterministic_checklist: boolean;
+      has_acceptance_review: boolean;
+      has_reconciliation: boolean;
+      has_done_gate: boolean;
+      can_mark_done: boolean;
+    };
+    missing_items: string[];
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchJson<typeof data>(`/api/local/acceptance/${props.taskId}`)
+      .then(result => { if (!cancelled && result) setData(result); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [props.taskId]);
+
+  if (!data) return <p className="subtle">Loading acceptance status...</p>;
+
+  const verdictClass = data.verdict === "accepted" || data.verdict === "accepted_with_notes"
+    ? "badge passed"
+    : data.verdict === "pending"
+    ? "badge queued"
+    : "badge failed";
+
+  return (
+    <div className="acceptance-card">
+      <div className="card-grid">
+        <div className="stat"><span>Verdict</span><strong><span className={verdictClass}>{data.verdict}</span></strong></div>
+        <div className="stat"><span>Deterministic</span><strong>{data.deterministic_passed ? "Passed" : "Failed"}</strong></div>
+        <div className="stat"><span>Findings</span><strong>{data.findings_count}</strong></div>
+        <div className="stat"><span>Can Proceed</span><strong>{data.can_proceed ? "Yes" : "No"}</strong></div>
+      </div>
+      {data.critical_findings > 0 ? <p className="subtle" style={{ color: "#c53030" }}>{data.critical_findings} critical finding(s)</p> : null}
+      {data.warning_findings > 0 ? <p className="subtle" style={{ color: "#8a4b14" }}>{data.warning_findings} warning finding(s)</p> : null}
+      {data.requires_human_approval ? <p className="subtle" style={{ color: "#8a4b14" }}>Requires human approval</p> : null}
+      <div className="completion-path">
+        <p className="subtle">Completion Path:</p>
+        <ul>
+          <li>Checklist: {data.completion_path.has_deterministic_checklist ? "✓" : "✗"}</li>
+          <li>Acceptance: {data.completion_path.has_acceptance_review ? "✓" : "✗"}</li>
+          <li>Reconciliation: {data.completion_path.has_reconciliation ? "✓" : "✗"}</li>
+          <li>Done Gate: {data.completion_path.has_done_gate ? "✓" : "✗"}</li>
+          <li>Can Mark Done: {data.completion_path.can_mark_done ? "✓" : "✗"}</li>
+        </ul>
+      </div>
+      {data.missing_items.length > 0 ? (
+        <div>
+          <p className="subtle">Missing items:</p>
+          <ul>{data.missing_items.map((item, i) => <li key={i} className="subtle">{item}</li>)}</ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function BudgetCard(props: { taskId: string }) {
+  const [data, setData] = useState<{
+    has_budget: boolean;
+    hard_limit: number;
+    estimated_cost: number;
+    budget_remaining: number;
+    warning_threshold: number;
+    budget_exhausted: boolean;
+    near_warning: boolean;
+    on_limit_reached: string;
+    total_input_tokens: number;
+    total_output_tokens: number;
+    interruption_pending: boolean;
+    interruption_event_id?: string;
+    interruption_kind?: "warning" | "hard_stop";
+    task_paused_by_budget: boolean;
+    spend_at_interruption?: number;
+    limit_at_interruption?: number;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [newLimitInput, setNewLimitInput] = useState("");
+  const [extensionInput, setExtensionInput] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchJson<{ status: typeof data }>(`/api/local/budget/${props.taskId}`)
+      .then(result => { if (!cancelled && result) setData(result.status); })
+      .catch(() => {});
+    const interval = setInterval(() => {
+      fetchJson<{ status: typeof data }>(`/api/local/budget/${props.taskId}`)
+        .then(result => { if (!cancelled && result) setData(result.status); })
+        .catch(() => {});
+    }, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [props.taskId]);
+
+  async function handleBudgetContinue(decision: "continue_with_new_limit" | "one_time_extension" | "stop_task", newLimit?: number, extensionAmount?: number) {
+    if (!data?.interruption_event_id) return;
+    setBusy(true);
+    try {
+      await fetchJson(`/api/local/budget/${props.taskId}/continue`, {
+        method: "POST",
+        body: JSON.stringify({ event_id: data.interruption_event_id, user_decision: decision, new_limit: newLimit, extension_amount: extensionAmount })
+      });
+      const result = await fetchJson<{ status: typeof data }>(`/api/local/budget/${props.taskId}`);
+      setData(result.status);
+      setNewLimitInput("");
+      setExtensionInput("");
+    } catch {}
+    setBusy(false);
+  }
+
+  if (!data) return <p className="subtle">Loading budget status...</p>;
+
+  const usagePct = data.hard_limit > 0 ? Math.round((data.estimated_cost / data.hard_limit) * 100) : 0;
+
+  return (
+    <div className={`budget-card ${data.task_paused_by_budget ? "budget-paused" : ""}`}>
+      {data.task_paused_by_budget ? (
+        <div className="budget-paused-banner">
+          <strong>⚠ Task Paused — Budget Hard Limit Reached</strong>
+          <p className="subtle">Spend: ${data.spend_at_interruption?.toFixed(2) ?? data.estimated_cost.toFixed(2)} / Limit: ${data.limit_at_interruption?.toFixed(2) ?? data.hard_limit.toFixed(2)}</p>
+        </div>
+      ) : null}
+      <div className="card-grid">
+        <div className="stat"><span>Hard Limit</span><strong>${data.hard_limit.toFixed(2)}</strong></div>
+        <div className="stat"><span>Spent</span><strong>${data.estimated_cost.toFixed(2)}</strong></div>
+        <div className="stat"><span>Remaining</span><strong>${data.budget_remaining.toFixed(2)}</strong></div>
+        <div className="stat"><span>Usage</span><strong>{usagePct}%</strong></div>
+      </div>
+      <div className="budget-bar-container">
+        <div
+          className={`budget-bar ${data.budget_exhausted ? "exhausted" : data.near_warning ? "warning" : "ok"}`}
+          style={{ width: `${Math.min(usagePct, 100)}%` }}
+        />
+      </div>
+      {data.budget_exhausted && !data.task_paused_by_budget ? <p style={{ color: "#c53030" }}>Budget exhausted — execution paused</p> : null}
+      {data.near_warning && !data.budget_exhausted && !data.task_paused_by_budget ? <p style={{ color: "#8a4b14" }}>Approaching budget warning threshold ({data.interruption_kind === "warning" ? "warning active" : ""})</p> : null}
+      <p className="subtle">On limit reached: {data.on_limit_reached} / Input tokens: {data.total_input_tokens} / Output tokens: {data.total_output_tokens}</p>
+      {data.interruption_pending && data.interruption_event_id ? (
+        <div className="budget-interruption-actions" style={{ marginTop: 8 }}>
+          <div className="budget-action-row">
+            <label className="subtle">Raise limit to:</label>
+            <input type="number" step="0.5" min={data.hard_limit} placeholder={`e.g. ${(data.hard_limit * 2).toFixed(2)}`} value={newLimitInput} onChange={e => setNewLimitInput(e.target.value)} />
+            <button className="secondary-button" disabled={busy || !newLimitInput} onClick={() => handleBudgetContinue("continue_with_new_limit", Number(newLimitInput))}>Raise Limit &amp; Continue</button>
+          </div>
+          <div className="budget-action-row">
+            <label className="subtle">One-time extension:</label>
+            <input type="number" step="0.5" min="0.1" placeholder={`e.g. ${(data.hard_limit * 0.5).toFixed(2)}`} value={extensionInput} onChange={e => setExtensionInput(e.target.value)} />
+            <button className="secondary-button" disabled={busy || !extensionInput} onClick={() => handleBudgetContinue("one_time_extension", undefined, Number(extensionInput))}>Extend &amp; Continue</button>
+          </div>
+          <div className="budget-action-row">
+            <button className="secondary-button danger-button" disabled={busy} onClick={() => handleBudgetContinue("stop_task")}>Stop Task</button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MultiAgentLimitsCard() {
+  const [data, setData] = useState<{
+    resource_mode: string;
+    effective_max_parallel: number;
+    effective_max_total_per_task: number;
+    effective_max_depth: number;
+    clamped_by: string;
+    logical_cpu_cores: number;
+    available_memory_mb: number;
+    cpu_reserve_ratio: number;
+    memory_reserve_ratio: number;
+  } | null>(null);
+
+  useEffect(() => {
+    fetchJson<{
+      policy: { subagent_resource_mode: string; cpu_reserve_ratio: number; memory_reserve_ratio: number };
+      limits: { effective_max_parallel: number; effective_max_total_per_task: number; effective_max_depth: number; clamped_by: string };
+      machine: { logical_cpu_cores: number; available_memory_mb: number };
+    }>("/api/local/settings/delegation-policy")
+      .then(result => {
+        if (result) setData({
+          resource_mode: result.policy.subagent_resource_mode,
+          effective_max_parallel: result.limits.effective_max_parallel,
+          effective_max_total_per_task: result.limits.effective_max_total_per_task,
+          effective_max_depth: result.limits.effective_max_depth,
+          clamped_by: result.limits.clamped_by,
+          logical_cpu_cores: result.machine.logical_cpu_cores,
+          available_memory_mb: result.machine.available_memory_mb,
+          cpu_reserve_ratio: result.policy.cpu_reserve_ratio,
+          memory_reserve_ratio: result.policy.memory_reserve_ratio
+        });
+      })
+      .catch(() => {});
+  }, []);
+
+  if (!data) return <p className="subtle">Loading multi-agent limits...</p>;
+
+  return (
+    <div className="multi-agent-limits-card">
+      <div className="card-grid">
+        <div className="stat"><span>Mode</span><strong>{data.resource_mode}</strong></div>
+        <div className="stat"><span>Max Parallel</span><strong>{data.effective_max_parallel}</strong></div>
+        <div className="stat"><span>Max Per Task</span><strong>{data.effective_max_total_per_task}</strong></div>
+        <div className="stat"><span>Max Depth</span><strong>{data.effective_max_depth}</strong></div>
+      </div>
+      <p className="subtle">CPU reserve: {(data.cpu_reserve_ratio * 100).toFixed(0)}% / Memory reserve: {(data.memory_reserve_ratio * 100).toFixed(0)}% / Clamped by: {data.clamped_by}</p>
+      <p className="subtle">Machine: {data.logical_cpu_cores} CPUs / {data.available_memory_mb} MB RAM</p>
     </div>
   );
 }

@@ -534,7 +534,7 @@ export function initializeDefaultPrivilegedOperationContracts(): PrivilegedOpera
   addAdminOperationRegistryEntry({
     operation_kind: "firewall_rule_change",
     reason: "Required for network egress enforcement via Windows Firewall",
-    expected_command: 'New-NetFirewallRule -DisplayName "Apex-Deny" -Direction Outbound -Action Block',
+    expected_command: 'New-NetFirewallRule -DisplayName "CompanyBrain-Deny" -Direction Outbound -Action Block',
     rollback_notes: "Remove firewall rule by display name",
     impact_if_unavailable: "degraded",
     alternative_approach: "Environment variable-based network restriction (less secure)"

@@ -1,4 +1,4 @@
-type ApexWindowConfig = {
+type CompanyBrainWindowConfig = {
   apiBase?: string;
   runtimeLabel?: string;
 };
@@ -65,7 +65,7 @@ export type DesktopNavigationEventPolicy = {
 
 declare global {
   interface Window {
-    __APEX_CONFIG__?: ApexWindowConfig;
+    __APEX_CONFIG__?: CompanyBrainWindowConfig;
     __TAURI__?: unknown;
     __TAURI_INTERNALS__?: {
       invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -81,7 +81,7 @@ export type DesktopRuntimeInfo = {
   apiBase: string;
 };
 
-function readWindowConfig(): ApexWindowConfig | undefined {
+function readWindowConfig(): CompanyBrainWindowConfig | undefined {
   if (typeof window === "undefined") return undefined;
   return window.__APEX_CONFIG__;
 }

@@ -1,13 +1,47 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+function resolveLocalSettingsPath(baseEnv = process.env) {
+  const explicitPath = baseEnv.APEX_LOCAL_SETTINGS_PATH?.trim();
+  if (explicitPath) {
+    return resolve(explicitPath);
+  }
+
+  if (process.platform === "win32") {
+    const localAppData = baseEnv.LOCALAPPDATA?.trim();
+    return resolve(localAppData || resolve(homedir(), "AppData", "Local"), "CompanyBrain", "app-settings.json");
+  }
+
+  return resolve(baseEnv.XDG_CONFIG_HOME?.trim() || resolve(homedir(), ".config"), "apex", "app-settings.json");
+}
+
+function readSavedLocalDevRoot(baseEnv = process.env) {
+  try {
+    const settingsPath = resolveLocalSettingsPath(baseEnv);
+    if (!existsSync(settingsPath)) {
+      return null;
+    }
+    const raw = JSON.parse(readFileSync(settingsPath, "utf8"));
+    const candidate = typeof raw?.local_dev_root === "string" ? raw.local_dev_root.trim() : "";
+    return candidate ? resolve(candidate) : null;
+  } catch {
+    return null;
+  }
+}
+
 function detectPreferredLocalDevRoot() {
   const configured = process.env.APEX_LOCAL_DEV_ROOT?.trim();
   if (configured) {
     return configured;
+  }
+
+  const saved = readSavedLocalDevRoot(process.env);
+  if (saved) {
+    return saved;
   }
 
   if (process.platform === "win32") {

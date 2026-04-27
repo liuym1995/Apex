@@ -1,8 +1,14 @@
 import Fastify from "fastify";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { accessSync, constants as fsConstants, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
-import { loadBaseEnv } from "@apex/shared-config";
+import {
+  buildRecommendedLocalAppSettings,
+  loadBaseEnv,
+  loadLocalAppSettings,
+  resolveLocalAppSettingsPath,
+  saveLocalAppSettings
+} from "@apex/shared-config";
 import {
   bootstrapLocalDemoData,
   captureLocalBrowserSnapshot,
@@ -124,7 +130,7 @@ import {
   resolveElementAction,
   getCircuitBreakerStatus
 } from "@apex/shared-runtime";
-import { store } from "@apex/shared-state";
+import { stateBackendInfo, store } from "@apex/shared-state";
 import {
   CanonicalSkillBundleManifestSchema,
   CanonicalSkillDocumentFormatSchema,
@@ -185,11 +191,284 @@ const TOOL_GATEWAY_BASE_URL = process.env.APEX_TOOL_GATEWAY_BASE_URL ?? "http://
 
 const app = Fastify({ logger: false });
 
+const LOCAL_APP_SETTINGS_FIELD_KEYS = [
+  "workspace_root",
+  "default_output_dir",
+  "default_task_workdir",
+  "default_write_root",
+  "default_export_dir",
+  "artifact_dir",
+  "export_dir",
+  "verification_evidence_dir",
+  "task_run_dir",
+  "local_dev_root"
+] as const;
+
+const LocalAppSettingsFieldUpdateSchema = z.object({
+  workspace_root: z.string().min(1).optional(),
+  default_output_dir: z.string().min(1).optional(),
+  default_task_workdir: z.string().min(1).optional(),
+  default_write_root: z.string().min(1).optional(),
+  default_export_dir: z.string().min(1).optional(),
+  artifact_dir: z.string().min(1).optional(),
+  export_dir: z.string().min(1).optional(),
+  verification_evidence_dir: z.string().min(1).optional(),
+  task_run_dir: z.string().min(1).optional(),
+  local_dev_root: z.string().min(1).optional(),
+  install_completed: z.boolean().optional()
+});
+
 function readPositiveIntEnv(envKey: string, fallback: number): number {
   const raw = process.env[envKey];
   if (!raw) return fallback;
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function validateDirectoryPath(path: string, options: { createIfMissing?: boolean; required?: boolean } = {}) {
+  const { createIfMissing = true, required = true } = options;
+  try {
+    if (createIfMissing) {
+      mkdirSync(path, { recursive: true });
+    }
+    const stats = statSync(path);
+    if (!stats.isDirectory()) {
+      return {
+        status: required ? "invalid" : "attention",
+        message: "Configured path exists but is not a directory."
+      } as const;
+    }
+    accessSync(path, fsConstants.R_OK | fsConstants.W_OK);
+    return {
+      status: "ready",
+      message: "Directory is available and writable."
+    } as const;
+  } catch (error) {
+    return {
+      status: required ? "invalid" : "attention",
+      message: (error as Error).message
+    } as const;
+  }
+}
+
+function validateWorkspaceRoot(path: string) {
+  try {
+    const stats = statSync(path);
+    if (!stats.isDirectory()) {
+      return {
+        status: "invalid",
+        message: "Workspace root must point to an existing directory."
+      } as const;
+    }
+    accessSync(path, fsConstants.R_OK);
+    return {
+      status: "ready",
+      message: "Workspace root is readable."
+    } as const;
+  } catch (error) {
+    return {
+      status: "invalid",
+      message: (error as Error).message
+    } as const;
+  }
+}
+
+function buildLocalAppSettingsStatus() {
+  const effective = loadLocalAppSettings();
+  const defaults = buildRecommendedLocalAppSettings();
+  const settingsPath = resolveLocalAppSettingsPath();
+  const localDbValidation = validateDirectoryPath(dirname(effective.local_db_path), { createIfMissing: true, required: true });
+
+  const fields = [
+    {
+      key: "workspace_root",
+      label: "Workspace Root",
+      description: "Default workspace directory used for local task and file operations.",
+      value: effective.workspace_root,
+      default_value: defaults.workspace_root,
+      required: true,
+      editable: true,
+      restart_required: false,
+      ...validateWorkspaceRoot(effective.workspace_root)
+    },
+    {
+      key: "default_output_dir",
+      label: "Default Output Directory",
+      description: "Default write/export location for generated files and workspace outputs.",
+      value: effective.default_output_dir,
+      default_value: defaults.default_output_dir,
+      required: true,
+      editable: true,
+      restart_required: false,
+      ...validateDirectoryPath(effective.default_output_dir, { createIfMissing: true, required: true })
+    },
+    {
+      key: "default_task_workdir",
+      label: "Default Task Workdir",
+      description: "Root directory for per-task working directories. Each task gets a subfolder.",
+      value: effective.default_task_workdir,
+      default_value: defaults.default_task_workdir,
+      required: false,
+      editable: true,
+      restart_required: false,
+      ...validateDirectoryPath(effective.default_task_workdir, { createIfMissing: true, required: false })
+    },
+    {
+      key: "default_write_root",
+      label: "Default Write Root",
+      description: "Root directory for file writes when no explicit target path is provided.",
+      value: effective.default_write_root,
+      default_value: defaults.default_write_root,
+      required: false,
+      editable: true,
+      restart_required: false,
+      ...validateDirectoryPath(effective.default_write_root, { createIfMissing: true, required: false })
+    },
+    {
+      key: "default_export_dir",
+      label: "Default Export Directory",
+      description: "Root directory for export flows (bundles, reports, user-facing outputs).",
+      value: effective.default_export_dir,
+      default_value: defaults.default_export_dir,
+      required: false,
+      editable: true,
+      restart_required: false,
+      ...validateDirectoryPath(effective.default_export_dir, { createIfMissing: true, required: false })
+    },
+    {
+      key: "artifact_dir",
+      label: "Artifact Directory",
+      description: "Directory used for local artifacts, backups, and execution evidence.",
+      value: effective.artifact_dir,
+      default_value: defaults.artifact_dir,
+      required: true,
+      editable: true,
+      restart_required: false,
+      ...validateDirectoryPath(effective.artifact_dir, { createIfMissing: true, required: true })
+    },
+    {
+      key: "export_dir",
+      label: "Export Directory",
+      description: "Default directory for exported bundles, reports, and user-facing outputs.",
+      value: effective.export_dir,
+      default_value: defaults.export_dir,
+      required: false,
+      editable: true,
+      restart_required: false,
+      ...validateDirectoryPath(effective.export_dir, { createIfMissing: true, required: false })
+    },
+    {
+      key: "verification_evidence_dir",
+      label: "Verification Evidence Directory",
+      description: "Directory for acceptance, checklist, reconciliation, and done-gate evidence.",
+      value: effective.verification_evidence_dir,
+      default_value: defaults.verification_evidence_dir,
+      required: false,
+      editable: true,
+      restart_required: false,
+      ...validateDirectoryPath(effective.verification_evidence_dir, { createIfMissing: true, required: false })
+    },
+    {
+      key: "task_run_dir",
+      label: "Task Run Directory",
+      description: "Directory for checkpoints, replay, rollback, and per-task runtime files.",
+      value: effective.task_run_dir,
+      default_value: defaults.task_run_dir,
+      required: false,
+      editable: true,
+      restart_required: false,
+      ...validateDirectoryPath(effective.task_run_dir, { createIfMissing: true, required: false })
+    },
+    {
+      key: "local_dev_root",
+      label: "Local Runtime Root",
+      description: "Base directory for logs, SQLite data, temp files, and desktop-local runtime assets.",
+      value: effective.local_dev_root,
+      default_value: defaults.local_dev_root,
+      required: true,
+      editable: true,
+      restart_required: true,
+      ...validateDirectoryPath(effective.local_dev_root, { createIfMissing: true, required: true })
+    }
+  ] as const;
+
+  const missingRequired = fields
+    .filter(field => field.required && field.status !== "ready")
+    .map(field => field.key);
+  const firstRun = !effective.install_completed;
+
+  return {
+    first_run: firstRun,
+    requires_attention: firstRun || missingRequired.length > 0 || fields.some(field => field.status !== "ready"),
+    missing_required: missingRequired,
+    restart_required_fields: fields.filter(field => field.restart_required).map(field => field.key),
+    settings_path: settingsPath,
+    effective: {
+      ...effective,
+      local_db_path: effective.local_db_path
+    },
+    defaults: {
+      ...defaults,
+      local_db_path: defaults.local_db_path
+    },
+    runtime: {
+      state_backend_path: stateBackendInfo.path,
+      local_db_parent_status: localDbValidation.status,
+      local_db_parent_message: localDbValidation.message
+    },
+    fields
+  };
+}
+
+function applySmartLocalAppSettingsUpdate(input: z.infer<typeof LocalAppSettingsFieldUpdateSchema>) {
+  const current = loadLocalAppSettings();
+  const next = { ...input };
+
+  if (input.workspace_root && !input.default_output_dir) {
+    const currentDefaultOutput = resolve(current.workspace_root, "output");
+    if (resolve(current.default_output_dir) === currentDefaultOutput) {
+      next.default_output_dir = resolve(input.workspace_root, "output");
+    }
+  }
+
+  if (input.workspace_root && !input.default_task_workdir) {
+    const currentDefaultWorkdir = resolve(current.workspace_root, "work");
+    if (resolve(current.default_task_workdir) === currentDefaultWorkdir) {
+      next.default_task_workdir = resolve(input.workspace_root, "work");
+    }
+  }
+
+  if (input.workspace_root && !input.default_write_root) {
+    const currentDefaultWriteRoot = resolve(current.workspace_root, "output");
+    if (resolve(current.default_write_root) === currentDefaultWriteRoot) {
+      next.default_write_root = resolve(input.workspace_root, "output");
+    }
+  }
+
+  if (input.local_dev_root) {
+    const currentDefaultArtifact = resolve(current.local_dev_root, "artifacts");
+    const currentDefaultExport = resolve(current.local_dev_root, "exports");
+    const currentDefaultExportDir = resolve(current.local_dev_root, "exports");
+    const currentDefaultVerification = resolve(current.local_dev_root, "verification");
+    const currentDefaultTaskRun = resolve(current.local_dev_root, "tasks");
+    if (!input.artifact_dir && resolve(current.artifact_dir) === currentDefaultArtifact) {
+      next.artifact_dir = resolve(input.local_dev_root, "artifacts");
+    }
+    if (!input.export_dir && resolve(current.export_dir) === currentDefaultExport) {
+      next.export_dir = resolve(input.local_dev_root, "exports");
+    }
+    if (!input.default_export_dir && resolve(current.default_export_dir) === currentDefaultExportDir) {
+      next.default_export_dir = resolve(input.local_dev_root, "exports");
+    }
+    if (!input.verification_evidence_dir && resolve(current.verification_evidence_dir) === currentDefaultVerification) {
+      next.verification_evidence_dir = resolve(input.local_dev_root, "verification");
+    }
+    if (!input.task_run_dir && resolve(current.task_run_dir) === currentDefaultTaskRun) {
+      next.task_run_dir = resolve(input.local_dev_root, "tasks");
+    }
+  }
+
+  return saveLocalAppSettings(next);
 }
 
 const RATE_LIMIT_WINDOWS_MS = 60_000;
@@ -2167,6 +2446,478 @@ app.post("/api/local/bootstrap-demo", async () => {
   return { tasks: bootstrapLocalDemoData() };
 });
 
+app.get("/api/local/settings/status", async () => {
+  return buildLocalAppSettingsStatus();
+});
+
+app.get("/api/local/settings", async () => {
+  return buildLocalAppSettingsStatus();
+});
+
+app.post("/api/local/settings", async (request, reply) => {
+  try {
+    const body = LocalAppSettingsFieldUpdateSchema.parse(request.body ?? {});
+    const saved = applySmartLocalAppSettingsUpdate(body);
+    return {
+      saved,
+      status: buildLocalAppSettingsStatus(),
+      message: "Local app settings updated."
+    };
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.get("/api/local/settings/delegation-policy", async () => {
+  const { getDefaultDelegationPolicy, loadDelegationPolicy, computeEffectiveDelegationLimits, detectMachineResources, getDelegationPolicyDiagnostics } = await import("@apex/shared-runtime");
+  const policy = loadDelegationPolicy();
+  const machine = detectMachineResources();
+  const limits = computeEffectiveDelegationLimits();
+  const diag = getDelegationPolicyDiagnostics();
+  return { policy, machine, limits, diagnostics: diag };
+});
+
+app.post("/api/local/settings/delegation-policy", async (request, reply) => {
+  try {
+    const { updateDelegationPolicy, getDelegationPolicyDiagnostics } = await import("@apex/shared-runtime");
+    const body = request.body as Record<string, unknown>;
+    const updates: Record<string, unknown> = {};
+    if (typeof body.subagent_resource_mode === "string") updates.subagent_resource_mode = body.subagent_resource_mode;
+    if (typeof body.cpu_reserve_ratio === "number") updates.cpu_reserve_ratio = body.cpu_reserve_ratio;
+    if (typeof body.memory_reserve_ratio === "number") updates.memory_reserve_ratio = body.memory_reserve_ratio;
+    if (typeof body.max_parallel_subagents === "number") updates.max_parallel_subagents = body.max_parallel_subagents;
+    if (typeof body.max_total_subagents_per_task === "number") updates.max_total_subagents_per_task = body.max_total_subagents_per_task;
+    if (typeof body.max_delegation_depth === "number") updates.max_delegation_depth = body.max_delegation_depth;
+    const updated = updateDelegationPolicy(updates);
+    const diag = getDelegationPolicyDiagnostics();
+    return { policy: updated, diagnostics: diag, message: "Delegation policy updated." };
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.get("/api/local/settings/budget-policy", async () => {
+  const { getBudgetPolicyForTask, getBudgetDiagnostics, listModelPricing } = await import("@apex/shared-runtime");
+  const policy = getBudgetPolicyForTask("__default__");
+  const diag = getBudgetDiagnostics();
+  const pricing = listModelPricing();
+  return { policy, pricing, diagnostics: diag };
+});
+
+app.post("/api/local/settings/budget-policy", async (request, reply) => {
+  try {
+    const { createBudgetPolicy, getBudgetPolicyForTask, getBudgetDiagnostics } = await import("@apex/shared-runtime");
+    const body = request.body as Record<string, unknown>;
+    const updates: Record<string, unknown> = {};
+    if (typeof body.hard_limit_amount === "number") updates.hard_limit_amount = body.hard_limit_amount;
+    if (typeof body.warning_threshold_pct === "number") updates.warning_threshold_pct = body.warning_threshold_pct;
+    if (typeof body.on_limit_reached === "string") updates.on_limit_reached = body.on_limit_reached;
+    createBudgetPolicy(updates);
+    const policy = getBudgetPolicyForTask("__default__");
+    const diag = getBudgetDiagnostics();
+    return { policy, diagnostics: diag, message: "Budget policy updated." };
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.get("/api/local/dispatch-plans/:planId", async (request, reply) => {
+  try {
+    const { getDispatchPlan, listDispatchStepsForPlan, getDispatchDiagnostics } = await import("@apex/shared-runtime");
+    const { planId } = request.params as { planId: string };
+    const plan = getDispatchPlan(planId);
+    if (!plan) return reply.code(404).send({ message: "Dispatch plan not found" });
+    const steps = listDispatchStepsForPlan(planId);
+    const diag = getDispatchDiagnostics();
+    return { plan, steps, diagnostics: diag };
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.post("/api/local/dispatch-plans", async (request, reply) => {
+  try {
+    const { createDispatchPlan, addDispatchStep, getDispatchPlan, getDispatchDiagnostics } = await import("@apex/shared-runtime");
+    const body = request.body as { task_id: string; supervisor_agent_id?: string; steps?: Array<{ goal: string; depends_on_step_ids?: string[] }> };
+    const plan = createDispatchPlan({ task_id: body.task_id, supervisor_agent_id: body.supervisor_agent_id ?? "supervisor" });
+    if (body.steps) {
+      for (const step of body.steps) {
+        addDispatchStep({
+          plan_id: plan.plan_id,
+          goal: step.goal,
+          depends_on_step_ids: step.depends_on_step_ids,
+          supervisor_agent_id: body.supervisor_agent_id ?? "supervisor"
+        });
+      }
+    }
+    const diag = getDispatchDiagnostics();
+    return { plan, diagnostics: diag };
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.post("/api/local/dispatch-plans/:planId/steps/:stepId/assign", async (request, reply) => {
+  try {
+    const { assignStepToSubagent } = await import("@apex/shared-runtime");
+    const { planId, stepId } = request.params as { planId: string; stepId: string };
+    const body = request.body as { agent_id: string; supervisor_agent_id: string };
+    const result = assignStepToSubagent({
+      plan_id: planId,
+      step_id: stepId,
+      agent_id: body.agent_id,
+      supervisor_agent_id: body.supervisor_agent_id
+    });
+    return { assignment: result };
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.post("/api/local/dispatch-plans/:planId/steps/:stepId/release-lease", async (request, reply) => {
+  try {
+    const { releaseLease } = await import("@apex/shared-runtime");
+    const body = request.body as { lease_id: string };
+    const result = releaseLease(body.lease_id);
+    return { lease: result };
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.post("/api/local/dispatch-plans/:planId/activate", async (request, reply) => {
+  try {
+    const { activatePlan, getDispatchPlan } = await import("@apex/shared-runtime");
+    const { planId } = request.params as { planId: string };
+    const plan = activatePlan(planId);
+    return { plan };
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.get("/api/local/subagent-envelopes/:taskId", async (request, reply) => {
+  try {
+    const { getContextEnvelopesForTask, getResultEnvelopesForTask } = await import("@apex/shared-runtime");
+    const { taskId } = request.params as { taskId: string };
+    const contextEnvelopes = getContextEnvelopesForTask(taskId);
+    const resultEnvelopes = getResultEnvelopesForTask(taskId);
+    return { context_envelopes: contextEnvelopes, result_envelopes: resultEnvelopes };
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.get("/api/local/acceptance/:taskId", async (request, reply) => {
+  try {
+    const { getAcceptanceReview, listAcceptanceReviewsForTask, listAcceptanceVerdictsForTask, getCompletionPathStatus } = await import("@apex/shared-runtime");
+    const { taskId } = request.params as { taskId: string };
+    const reviews = listAcceptanceReviewsForTask(taskId);
+    const verdicts = listAcceptanceVerdictsForTask(taskId);
+    const completionPath = getCompletionPathStatus(taskId);
+    return { reviews, verdicts, completion_path: completionPath };
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.post("/api/local/acceptance/:taskId/review", async (request, reply) => {
+  try {
+    const { createAcceptanceReview, issueAcceptanceVerdict } = await import("@apex/shared-runtime");
+    const { taskId } = request.params as { taskId: string };
+    const body = request.body as {
+      reviewer_kind?: string;
+      findings?: Array<{ category: string; description: string; severity: string; evidence_ref?: string }>;
+      deterministic_passed?: boolean;
+      semantic_verdict?: string;
+      risk_level?: string;
+    };
+    const review = createAcceptanceReview({
+      task_id: taskId,
+      reviewer_kind: (body.reviewer_kind ?? "acceptance_agent") as "acceptance_agent" | "deterministic_checklist" | "reconciliation" | "human",
+      findings: (body.findings ?? []).map(f => ({
+        finding_id: createEntityId("afnd"),
+        category: f.category as "deterministic" | "semantic" | "safety" | "completeness" | "quality",
+        description: f.description,
+        severity: f.severity as "info" | "warning" | "critical",
+        evidence_ref: f.evidence_ref
+      })),
+      deterministic_passed: body.deterministic_passed ?? true,
+      semantic_verdict: body.semantic_verdict as "accepted" | "accepted_with_notes" | "revise_and_retry" | "blocked" | undefined,
+      risk_level: (body.risk_level ?? "low") as "low" | "medium" | "high" | "critical"
+    });
+    const verdict = issueAcceptanceVerdict({
+      task_id: taskId,
+      review_id: review.review_id,
+      verdict: review.semantic_verdict ?? "accepted",
+      rationale: "Review completed via API",
+      risk_level: review.risk_level
+    });
+    return { review, verdict };
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.get("/api/local/budget/:taskId", async (request, reply) => {
+  try {
+    const { getBudgetStatusForTask, getBudgetPolicyForTask, getBudgetDiagnostics, getPendingInterruptionForTask } = await import("@apex/shared-runtime");
+    const { taskId } = request.params as { taskId: string };
+    const status = getBudgetStatusForTask(taskId);
+    const policy = getBudgetPolicyForTask(taskId);
+    const diag = getBudgetDiagnostics();
+    const interruption = getPendingInterruptionForTask(taskId);
+    return {
+      status: {
+        has_budget: !!status,
+        hard_limit: status?.hard_limit ?? policy?.hard_limit_amount ?? 5,
+        estimated_cost: status?.estimated_cost ?? 0,
+        budget_remaining: status?.budget_remaining ?? 5,
+        warning_threshold: status?.warning_threshold ?? 4,
+        budget_exhausted: status?.budget_exhausted ?? false,
+        near_warning: status ? status.estimated_cost >= status.warning_threshold : false,
+        on_limit_reached: policy?.on_limit_reached ?? "pause_and_ask",
+        total_input_tokens: status?.total_input_tokens ?? 0,
+        total_output_tokens: status?.total_output_tokens ?? 0,
+        interruption_pending: !!interruption,
+        interruption_event_id: interruption?.event_id,
+        interruption_kind: interruption?.interruption_kind,
+        task_paused_by_budget: !!interruption && interruption.interruption_kind === "hard_stop",
+        spend_at_interruption: interruption?.spend_at_interruption,
+        limit_at_interruption: interruption?.limit_at_interruption
+      },
+      policy,
+      diagnostics: diag
+    };
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.post("/api/local/budget/:taskId/continue", async (request, reply) => {
+  try {
+    const { resolveBudgetInterruption, getBudgetStatusForTask } = await import("@apex/shared-runtime");
+    const { taskId } = request.params as { taskId: string };
+    const body = request.body as { event_id: string; user_decision: "continue_with_new_limit" | "one_time_extension" | "stop_task"; new_limit?: number; extension_amount?: number };
+    const result = resolveBudgetInterruption({
+      event_id: body.event_id,
+      user_decision: body.user_decision,
+      new_limit: body.new_limit,
+      extension_amount: body.extension_amount
+    });
+    const status = getBudgetStatusForTask(taskId);
+    return { interruption: result, status };
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.get("/api/local/evolution/diagnostics", async () => {
+  const { getEvolutionDiagnostics } = await import("@apex/shared-runtime");
+  return getEvolutionDiagnostics();
+});
+
+app.post("/api/local/evolution/cycle", async () => {
+  const { runEvolutionCycle } = await import("@apex/shared-runtime");
+  return runEvolutionCycle();
+});
+
+app.get("/api/local/evolution/candidates", async () => {
+  const { getEvolutionDiagnostics } = await import("@apex/shared-runtime");
+  const diag = getEvolutionDiagnostics();
+  return diag;
+});
+
+app.post("/api/local/evolution/candidate/:candidateId/gate", async (request, reply) => {
+  try {
+    const { gateEvolutionCandidate } = await import("@apex/shared-runtime");
+    const { candidateId } = request.params as { candidateId: string };
+    const body = request.body as { replay_score_threshold?: number; budget_remaining_usd?: number } | undefined;
+    const result = gateEvolutionCandidate({
+      candidate_id: candidateId,
+      replay_score_threshold: body?.replay_score_threshold,
+      budget_remaining_usd: body?.budget_remaining_usd
+    });
+    if ("error" in result) return reply.code(404).send(result);
+    return result;
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.post("/api/local/evolution/candidate/:candidateId/decision", async (request, reply) => {
+  try {
+    const { recordEvolutionPromotionDecision } = await import("@apex/shared-runtime");
+    const { candidateId } = request.params as { candidateId: string };
+    const body = request.body as { evolution_run_id: string; decision: "promote" | "reject" | "rollback" | "defer"; reason: string; replay_score?: number; regression_passed?: boolean; budget_impact_usd?: number; governance_review_required?: boolean };
+    const result = recordEvolutionPromotionDecision({
+      candidate_id: candidateId,
+      evolution_run_id: body.evolution_run_id,
+      decision: body.decision,
+      reason: body.reason,
+      replay_score: body.replay_score,
+      regression_passed: body.regression_passed,
+      budget_impact_usd: body.budget_impact_usd,
+      governance_review_required: body.governance_review_required
+    });
+    return result;
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.get("/api/local/evolution/workspace-panel", async () => {
+  const { buildEvolutionStatusPanelState } = await import("@apex/shared-runtime");
+  return buildEvolutionStatusPanelState();
+});
+
+app.get("/api/local/clawhub/diagnostics", async () => {
+  const { getClawHubDiagnostics } = await import("@apex/shared-runtime");
+  return getClawHubDiagnostics();
+});
+
+app.get("/api/local/clawhub/registry-configs", async () => {
+  const { listClawHubRegistryConfigs } = await import("@apex/shared-runtime");
+  return listClawHubRegistryConfigs();
+});
+
+app.post("/api/local/clawhub/registry-config", async (request, reply) => {
+  try {
+    const { createClawHubRegistryConfig } = await import("@apex/shared-runtime");
+    const body = request.body as { registry_endpoint?: string; registry_name?: string; auth_method?: "none" | "api_key" | "oauth2"; api_key_ref?: string; oauth2_client_id?: string; sync_interval_seconds?: number; auto_sync_enabled?: boolean };
+    return createClawHubRegistryConfig(body);
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.post("/api/local/clawhub/search", async (request, reply) => {
+  try {
+    const { searchClawHubSkills } = await import("@apex/shared-runtime");
+    const body = request.body as { query: string; registry_name?: string; tags?: string[] };
+    return searchClawHubSkills(body);
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.post("/api/local/clawhub/install", async (request, reply) => {
+  try {
+    const { installClawHubSkill } = await import("@apex/shared-runtime");
+    const body = request.body as { remote_skill_id: string; remote_skill_name: string; remote_version: string; registry_name?: string };
+    return installClawHubSkill(body);
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.get("/api/local/clawhub/installs", async () => {
+  const { listClawHubInstallRecords } = await import("@apex/shared-runtime");
+  return listClawHubInstallRecords();
+});
+
+app.post("/api/local/clawhub/publish", async (request, reply) => {
+  try {
+    const { publishToClawHub } = await import("@apex/shared-runtime");
+    const body = request.body as { local_skill_id: string; local_skill_name: string; local_version: number; registry_name?: string };
+    return publishToClawHub(body);
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.get("/api/local/clawhub/publishes", async () => {
+  const { listClawHubPublishRecords } = await import("@apex/shared-runtime");
+  return listClawHubPublishRecords();
+});
+
+app.post("/api/local/clawhub/sync", async (request, reply) => {
+  try {
+    const { syncClawHubRegistry } = await import("@apex/shared-runtime");
+    const body = request.body as { registry_name?: string; sync_kind?: "full" | "incremental" | "metadata_only" };
+    return syncClawHubRegistry(body ?? {});
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.get("/api/local/clawhub/syncs", async () => {
+  const { listClawHubSyncRecords } = await import("@apex/shared-runtime");
+  return listClawHubSyncRecords();
+});
+
+app.post("/api/local/clawhub/trust-verdict", async (request, reply) => {
+  try {
+    const { assessRemoteSkillTrust } = await import("@apex/shared-runtime");
+    const body = request.body as { remote_skill_id: string; registry_name?: string; verification_signals?: string[]; publisher_verified?: boolean; compatibility_check?: "pending" | "compatible" | "incompatible" | "unknown" };
+    return assessRemoteSkillTrust(body);
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.get("/api/local/clawhub/trust-verdicts", async () => {
+  const { listRemoteSkillTrustVerdicts } = await import("@apex/shared-runtime");
+  return listRemoteSkillTrustVerdicts();
+});
+
+app.get("/api/local/clawhub/remote-skill-review-panel", async () => {
+  const { buildRemoteSkillReviewPanelState } = await import("@apex/shared-runtime");
+  return buildRemoteSkillReviewPanelState();
+});
+
+app.post("/api/local/clawhub/install/:installId/approve", async (request, reply) => {
+  try {
+    const { listClawHubInstallRecords } = await import("@apex/shared-runtime");
+    const { installId } = request.params as { installId: string };
+    const body = request.body as { reviewed_by?: string };
+    const installs = listClawHubInstallRecords();
+    const install = installs.find(i => i.install_id === installId);
+    if (!install) return reply.code(404).send({ error: "Install record not found" });
+    if (install.install_status !== "pending_review") return reply.code(400).send({ error: "Install is not pending review" });
+    install.install_status = "installed";
+    install.installed_at = new Date().toISOString();
+    install.installed_by = body?.reviewed_by ?? "governance_review";
+    return install;
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.post("/api/local/clawhub/install/:installId/reject", async (request, reply) => {
+  try {
+    const { listClawHubInstallRecords } = await import("@apex/shared-runtime");
+    const { installId } = request.params as { installId: string };
+    const installs = listClawHubInstallRecords();
+    const install = installs.find(i => i.install_id === installId);
+    if (!install) return reply.code(404).send({ error: "Install record not found" });
+    if (install.install_status !== "pending_review") return reply.code(400).send({ error: "Install is not pending review" });
+    install.install_status = "review_rejected";
+    return install;
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
+app.post("/api/local/clawhub/publish/:publishId/approve", async (request, reply) => {
+  try {
+    const { listClawHubPublishRecords } = await import("@apex/shared-runtime");
+    const { publishId } = request.params as { publishId: string };
+    const body = request.body as { reviewed_by?: string };
+    const publishes = listClawHubPublishRecords();
+    const publish = publishes.find(p => p.publish_id === publishId);
+    if (!publish) return reply.code(404).send({ error: "Publish record not found" });
+    if (publish.publish_status !== "pending_approval") return reply.code(400).send({ error: "Publish is not pending approval" });
+    publish.publish_status = "published";
+    publish.governance_approved = true;
+    publish.published_at = new Date().toISOString();
+    publish.published_by = body?.reviewed_by ?? "governance_review";
+    return publish;
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
+});
+
 app.get("/api/local/dashboard", async () => {
   return {
     ...getLocalDashboard(),
@@ -4009,10 +4760,13 @@ app.post("/api/local/skills/:skillId/export-file", async (request, reply) => {
     const { skillId } = request.params as { skillId: string };
     const body = (request.body ?? {}) as { format?: unknown; path?: string };
     const format = CanonicalSkillDocumentFormatSchema.parse(body.format ?? "canonical_json");
-    if (!body.path) {
-      return reply.code(400).send({ message: "path is required" });
+    let resolvedPath: string;
+    if (body.path && isAbsolute(body.path)) {
+      resolvedPath = body.path;
+    } else {
+      const settings = loadLocalAppSettings();
+      resolvedPath = resolve(settings.default_export_dir, body.path ?? `${skillId}.json`);
     }
-    const resolvedPath = requireAbsolutePath(body.path);
     const exported = exportCanonicalSkill({
       skill_id: skillId,
       format
@@ -4090,7 +4844,13 @@ app.post("/api/local/skills/export-bundle", async (request, reply) => {
       promotion_note: body.promotion_note
     });
     if (body.path) {
-      const resolvedPath = requireAbsolutePath(body.path);
+      let resolvedPath: string;
+      if (isAbsolute(body.path)) {
+        resolvedPath = body.path;
+      } else {
+        const settings = loadLocalAppSettings();
+        resolvedPath = resolve(settings.default_export_dir, body.path);
+      }
       mkdirSync(dirname(resolvedPath), { recursive: true });
       writeFileSync(resolvedPath, JSON.stringify(bundle, null, 2), "utf8");
       return { ...bundle, path: resolvedPath };

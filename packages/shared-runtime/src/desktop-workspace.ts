@@ -5,7 +5,7 @@ import {
 } from "@apex/shared-types";
 import { log } from "@apex/shared-observability";
 
-export type WorkspacePanelKind = "computer_use" | "replay" | "human_takeover" | "risk" | "execution_state" | "mcp_fabric" | "app_control" | "hybrid_memory_ttt" | "worker_session" | "scheduled_jobs" | "delegated_runtime" | "deerflow_boundary" | "blocker_dashboard" | "privileged_execution" | "readiness_matrix";
+export type WorkspacePanelKind = "computer_use" | "replay" | "human_takeover" | "risk" | "execution_state" | "mcp_fabric" | "app_control" | "hybrid_memory_ttt" | "worker_session" | "scheduled_jobs" | "delegated_runtime" | "deerflow_boundary" | "blocker_dashboard" | "privileged_execution" | "readiness_matrix" | "acceptance_status" | "budget_status" | "multi_agent_limits" | "evolution_status" | "remote_skill_review";
 
 export type WorkspacePanelStatus = "loading" | "active" | "error" | "minimized" | "hidden";
 
@@ -282,8 +282,55 @@ export interface DesktopWorkspaceState {
   blocker_dashboard_panel?: BlockerDashboardPanelState;
   privileged_execution_panel?: PrivilegedExecutionPanelState;
   readiness_matrix_panel?: ReadinessMatrixPanelState;
+  evolution_status_panel?: EvolutionStatusPanelState;
+  remote_skill_review_panel?: RemoteSkillReviewPanelState;
   execution_transitions: ExecutionStateTransition[];
   last_updated: string;
+}
+
+export interface EvolutionStatusPanelState {
+  skill_runs: number;
+  prompt_runs: number;
+  tool_desc_runs: number;
+  total_candidates: number;
+  promoted: number;
+  rejected: number;
+  rolled_back: number;
+  pending: number;
+  recent_candidates: Array<{
+    candidate_id: string;
+    target_name: string;
+    kind: string;
+    status: string;
+    confidence: number;
+    created_at: string;
+  }>;
+}
+
+export interface RemoteSkillReviewPanelState {
+  registry_configs: number;
+  pending_installs: number;
+  pending_publishes: number;
+  trust_verdicts: number;
+  pending_reviews: Array<{
+    install_id: string;
+    remote_skill_id: string;
+    remote_skill_name: string;
+    remote_version: string;
+    trust_level: string;
+    governance_review_required: boolean;
+    created_at: string;
+  }>;
+  recent_verdicts: Array<{
+    verdict_id: string;
+    remote_skill_id: string;
+    trust_level: string;
+    compatibility_check: string;
+    policy_compliant: boolean;
+    publisher_verified: boolean;
+    governance_review_required: boolean;
+    created_at: string;
+  }>;
 }
 
 export interface HybridMemoryTTTPanelState {
@@ -751,8 +798,91 @@ export function buildFullWorkspaceState(workspaceId: string): DesktopWorkspaceSt
     workspace.readiness_matrix_panel = buildReadinessMatrixPanelState();
   }
 
+  const evolutionPanel = workspace.active_panels.find(p => p.kind === "evolution_status");
+  if (evolutionPanel) {
+    workspace.evolution_status_panel = buildEvolutionStatusPanelState();
+  }
+
+  const remoteSkillReviewPanel = workspace.active_panels.find(p => p.kind === "remote_skill_review");
+  if (remoteSkillReviewPanel) {
+    workspace.remote_skill_review_panel = buildRemoteSkillReviewPanelState();
+  }
+
   workspace.last_updated = nowIso();
   return workspace;
+}
+
+export function buildEvolutionStatusPanelState(): EvolutionStatusPanelState {
+  const { getEvolutionDiagnostics } = require("./evolution-runtime.js") as typeof import("./evolution-runtime.js");
+  const diag = getEvolutionDiagnostics();
+  const recentCandidates = [...store.evolutionCandidates.values()]
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 10)
+    .map(c => ({
+      candidate_id: c.candidate_id,
+      target_name: c.target_name,
+      kind: c.kind,
+      status: c.status,
+      confidence: c.confidence,
+      created_at: c.created_at
+    }));
+  return {
+    skill_runs: diag.skill_runs,
+    prompt_runs: diag.prompt_runs,
+    tool_desc_runs: diag.tool_desc_runs,
+    total_candidates: diag.total_candidates,
+    promoted: diag.promoted,
+    rejected: diag.rejected,
+    rolled_back: diag.rolled_back,
+    pending: diag.pending,
+    recent_candidates: recentCandidates
+  };
+}
+
+export function buildRemoteSkillReviewPanelState(): RemoteSkillReviewPanelState {
+  const { getClawHubDiagnostics } = require("./clawhub-registry-adapter.js") as typeof import("./clawhub-registry-adapter.js");
+  const diag = getClawHubDiagnostics();
+
+  const pendingReviews = [...store.clawHubInstallRecords.values()]
+    .filter(i => i.install_status === "pending_review")
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 10)
+    .map(i => {
+      const verdict = [...store.remoteSkillTrustVerdicts.values()]
+        .find(v => v.remote_skill_id === i.remote_skill_id);
+      return {
+        install_id: i.install_id,
+        remote_skill_id: i.remote_skill_id,
+        remote_skill_name: i.remote_skill_name,
+        remote_version: i.remote_version,
+        trust_level: verdict?.trust_level ?? "untrusted",
+        governance_review_required: i.governance_review_required,
+        created_at: i.created_at
+      };
+    });
+
+  const recentVerdicts = [...store.remoteSkillTrustVerdicts.values()]
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 10)
+    .map(v => ({
+      verdict_id: v.verdict_id,
+      remote_skill_id: v.remote_skill_id,
+      trust_level: v.trust_level,
+      compatibility_check: v.compatibility_check,
+      policy_compliant: v.policy_compliant,
+      publisher_verified: v.publisher_verified,
+      governance_review_required: v.governance_review_required,
+      created_at: v.created_at
+    }));
+
+  return {
+    registry_configs: diag.registry_configs,
+    pending_installs: diag.pending_installs,
+    pending_publishes: diag.pending_publishes,
+    trust_verdicts: diag.trust_verdicts,
+    pending_reviews: pendingReviews,
+    recent_verdicts: recentVerdicts
+  };
 }
 
 export function buildHybridMemoryTTTPanelState(taskId?: string): HybridMemoryTTTPanelState {
@@ -1243,4 +1373,178 @@ export function buildReadinessMatrixPanelState(): ReadinessMatrixPanelState {
     source_layer_counts: sourceLayerCounts,
     last_generated_at: matrix.generated_at
   };
+}
+
+export interface AcceptanceStatusPanelState {
+  has_review: boolean;
+  verdict: string;
+  deterministic_passed: boolean;
+  findings_count: number;
+  critical_findings: number;
+  warning_findings: number;
+  can_proceed: boolean;
+  requires_human_approval: boolean;
+  completion_path: {
+    has_deterministic_checklist: boolean;
+    has_acceptance_review: boolean;
+    has_reconciliation: boolean;
+    has_done_gate: boolean;
+    can_mark_done: boolean;
+  };
+  missing_items: string[];
+  suggested_rerun_scope?: string;
+}
+
+export interface BudgetStatusPanelState {
+  has_budget: boolean;
+  hard_limit: number;
+  estimated_cost: number;
+  budget_remaining: number;
+  warning_threshold: number;
+  budget_exhausted: boolean;
+  near_warning: boolean;
+  on_limit_reached: string;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  interruption_pending: boolean;
+  interruption_event_id?: string;
+  interruption_kind?: "warning" | "hard_stop";
+  task_paused_by_budget: boolean;
+  spend_at_interruption?: number;
+  limit_at_interruption?: number;
+}
+
+export interface MultiAgentLimitsPanelState {
+  resource_mode: string;
+  max_parallel: number;
+  max_total_per_task: number;
+  max_delegation_depth: number;
+  cpu_reserve_ratio: number;
+  memory_reserve_ratio: number;
+  effective_max_parallel: number;
+  effective_max_total_per_task: number;
+  effective_max_depth: number;
+  clamped_by: string;
+  logical_cpu_cores: number;
+  available_memory_mb: number;
+}
+
+export function buildAcceptanceStatusPanelState(taskId: string): AcceptanceStatusPanelState {
+  try {
+    const { listAcceptanceReviewsForTask, listAcceptanceVerdictsForTask, getCompletionPathStatus } = require("./acceptance-agent.js") as typeof import("./acceptance-agent.js");
+    const reviews = listAcceptanceReviewsForTask(taskId);
+    const verdicts = listAcceptanceVerdictsForTask(taskId);
+    const completionPath = getCompletionPathStatus(taskId);
+    const latestReview = reviews[0];
+    const latestVerdict = verdicts[0];
+
+    return {
+      has_review: reviews.length > 0,
+      verdict: latestVerdict?.verdict ?? "pending",
+      deterministic_passed: latestReview?.deterministic_passed ?? false,
+      findings_count: latestReview?.findings.length ?? 0,
+      critical_findings: latestReview?.findings.filter(f => f.severity === "critical").length ?? 0,
+      warning_findings: latestReview?.findings.filter(f => f.severity === "warning").length ?? 0,
+      can_proceed: latestVerdict?.can_proceed ?? false,
+      requires_human_approval: latestVerdict?.requires_human_approval ?? false,
+      completion_path: completionPath,
+      missing_items: latestVerdict?.missing_items ?? [],
+      suggested_rerun_scope: latestVerdict?.suggested_rerun_scope
+    };
+  } catch {
+    return {
+      has_review: false,
+      verdict: "pending",
+      deterministic_passed: false,
+      findings_count: 0,
+      critical_findings: 0,
+      warning_findings: 0,
+      can_proceed: false,
+      requires_human_approval: false,
+      completion_path: { has_deterministic_checklist: false, has_acceptance_review: false, has_reconciliation: false, has_done_gate: false, can_mark_done: false },
+      missing_items: []
+    };
+  }
+}
+
+export function buildBudgetStatusPanelState(taskId: string): BudgetStatusPanelState {
+  try {
+    const { getBudgetStatusForTask, getBudgetPolicyForTask, getPendingInterruptionForTask } = require("./task-budget.js") as typeof import("./task-budget.js");
+    const status = getBudgetStatusForTask(taskId);
+    const policy = getBudgetPolicyForTask(taskId);
+    const pendingInterruption = getPendingInterruptionForTask(taskId);
+
+    return {
+      has_budget: !!status,
+      hard_limit: status?.hard_limit ?? policy?.hard_limit_amount ?? 5,
+      estimated_cost: status?.estimated_cost ?? 0,
+      budget_remaining: status?.budget_remaining ?? 5,
+      warning_threshold: status?.warning_threshold ?? 4,
+      budget_exhausted: status?.budget_exhausted ?? false,
+      near_warning: status ? status.estimated_cost >= status.warning_threshold : false,
+      on_limit_reached: policy?.on_limit_reached ?? "pause_and_ask",
+      total_input_tokens: status?.total_input_tokens ?? 0,
+      total_output_tokens: status?.total_output_tokens ?? 0,
+      interruption_pending: !!pendingInterruption,
+      interruption_event_id: pendingInterruption?.event_id,
+      interruption_kind: pendingInterruption?.interruption_kind,
+      task_paused_by_budget: !!pendingInterruption && pendingInterruption.interruption_kind === "hard_stop",
+      spend_at_interruption: pendingInterruption?.spend_at_interruption,
+      limit_at_interruption: pendingInterruption?.limit_at_interruption
+    };
+  } catch {
+    return {
+      has_budget: false,
+      hard_limit: 5,
+      estimated_cost: 0,
+      budget_remaining: 5,
+      warning_threshold: 4,
+      budget_exhausted: false,
+      near_warning: false,
+      on_limit_reached: "pause_and_ask",
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      interruption_pending: false,
+      task_paused_by_budget: false
+    };
+  }
+}
+
+export function buildMultiAgentLimitsPanelState(): MultiAgentLimitsPanelState {
+  try {
+    const { loadDelegationPolicy, computeEffectiveDelegationLimits, detectMachineResources } = require("./delegation-policy.js") as typeof import("./delegation-policy.js");
+    const policy = loadDelegationPolicy();
+    const limits = computeEffectiveDelegationLimits(policy);
+    const machine = detectMachineResources();
+
+    return {
+      resource_mode: policy.subagent_resource_mode,
+      max_parallel: policy.max_parallel_subagents,
+      max_total_per_task: policy.max_total_subagents_per_task,
+      max_delegation_depth: policy.max_delegation_depth,
+      cpu_reserve_ratio: policy.cpu_reserve_ratio,
+      memory_reserve_ratio: policy.memory_reserve_ratio,
+      effective_max_parallel: limits.effective_max_parallel,
+      effective_max_total_per_task: limits.effective_max_total_per_task,
+      effective_max_depth: limits.effective_max_depth,
+      clamped_by: limits.clamped_by,
+      logical_cpu_cores: machine.logical_cpu_cores,
+      available_memory_mb: machine.available_memory_mb
+    };
+  } catch {
+    return {
+      resource_mode: "auto",
+      max_parallel: 4,
+      max_total_per_task: 8,
+      max_delegation_depth: 2,
+      cpu_reserve_ratio: 0.2,
+      memory_reserve_ratio: 0.2,
+      effective_max_parallel: 4,
+      effective_max_total_per_task: 8,
+      effective_max_depth: 2,
+      clamped_by: "none",
+      logical_cpu_cores: 0,
+      available_memory_mb: 0
+    };
+  }
 }

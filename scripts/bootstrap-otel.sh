@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-echo "=== Apex OTEL Collector Bootstrap ==="
+echo "=== Company Brain OTEL Collector Bootstrap ==="
 
 OTEL_COLLECTOR_IMAGE="${OTEL_COLLECTOR_IMAGE:-otel/opentelemetry-collector-contrib:0.96.0}"
 OTEL_CONFIG_PATH="${OTEL_CONFIG_PATH:-$REPO_ROOT/infra/otel/collector-config.yaml}"
@@ -26,7 +26,7 @@ echo ""
 if command -v docker &>/dev/null; then
   echo "Starting OTEL Collector via Docker..."
   docker run -d \
-    --name apex-otel-collector \
+    --name company-brain-otel-collector \
     -p "${OTEL_HTTP_PORT}:4318" \
     -p "${OTEL_GRPC_PORT}:4317" \
     -p "${OTEL_PROMETHEUS_PORT}:8889" \
@@ -44,7 +44,7 @@ if command -v docker &>/dev/null; then
 elif command -v podman &>/dev/null; then
   echo "Starting OTEL Collector via Podman..."
   podman run -d \
-    --name apex-otel-collector \
+    --name company-brain-otel-collector \
     -p "${OTEL_HTTP_PORT}:4318" \
     -p "${OTEL_GRPC_PORT}:4317" \
     -p "${OTEL_PROMETHEUS_PORT}:8889" \

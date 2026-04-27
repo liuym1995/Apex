@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { loadLocalAppSettings } from "@apex/shared-config";
 import type {
   AgentTeamSummary,
   Artifact,
@@ -113,7 +114,19 @@ import type {
   ClaimsToPolicyMapping,
   DeerFlowBackboneReadiness,
   OSIsolationBackend,
-  IsolationPolicyToBackendMapping
+  IsolationPolicyToBackendMapping,
+  SkillEvolutionRun,
+  PromptEvolutionRun,
+  ToolDescriptionEvolutionRun,
+  EvolutionCandidate,
+  EvolutionPromotionDecision,
+  EvolutionRollbackRecord,
+  ClawHubRegistryConfig,
+  ClawHubSearchResult,
+  ClawHubInstallRecord,
+  ClawHubPublishRecord,
+  ClawHubSyncRecord,
+  RemoteSkillTrustVerdict
 } from "@apex/shared-types";
 
 export interface PrivilegedOperationContract {
@@ -354,7 +367,10 @@ type PersistedCollection = {
 };
 
 function resolveDbPath(): string {
-  return process.env.APEX_LOCAL_DB_PATH ?? resolve(process.cwd(), ".apex", "local-control-plane.sqlite");
+  if (process.env.APEX_LOCAL_DB_PATH?.trim()) {
+    return resolve(process.env.APEX_LOCAL_DB_PATH);
+  }
+  return loadLocalAppSettings().local_db_path;
 }
 
 const sqlitePath = resolveDbPath();
@@ -582,6 +598,18 @@ export const store = {
   skillPolicyProposals: new SqliteEntityMap<SkillPolicyProposal>("skill_policy_proposals"),
   schedules: new SqliteEntityMap<Schedule>("schedules"),
   skillCandidates: new SqliteEntityMap<SkillCandidate>("skill_candidates"),
+  skillEvolutionRuns: new SqliteEntityMap<SkillEvolutionRun>("skill_evolution_runs"),
+  promptEvolutionRuns: new SqliteEntityMap<PromptEvolutionRun>("prompt_evolution_runs"),
+  toolDescriptionEvolutionRuns: new SqliteEntityMap<ToolDescriptionEvolutionRun>("tool_description_evolution_runs"),
+  evolutionCandidates: new SqliteEntityMap<EvolutionCandidate>("evolution_candidates"),
+  evolutionPromotionDecisions: new SqliteEntityMap<EvolutionPromotionDecision>("evolution_promotion_decisions"),
+  evolutionRollbackRecords: new SqliteEntityMap<EvolutionRollbackRecord>("evolution_rollback_records"),
+  clawHubRegistryConfigs: new SqliteEntityMap<ClawHubRegistryConfig>("clawhub_registry_configs"),
+  clawHubSearchResults: new SqliteEntityMap<ClawHubSearchResult>("clawhub_search_results"),
+  clawHubInstallRecords: new SqliteEntityMap<ClawHubInstallRecord>("clawhub_install_records"),
+  clawHubPublishRecords: new SqliteEntityMap<ClawHubPublishRecord>("clawhub_publish_records"),
+  clawHubSyncRecords: new SqliteEntityMap<ClawHubSyncRecord>("clawhub_sync_records"),
+  remoteSkillTrustVerdicts: new SqliteEntityMap<RemoteSkillTrustVerdict>("remote_skill_trust_verdicts"),
   taskTemplates: new SqliteEntityMap<TaskTemplate>("task_templates"),
   capabilityResolutions: new SqliteEntityMap<CapabilityResolution>("capability_resolutions"),
   toolInvocations: new SqliteEntityMap<ToolInvocation>("tool_invocations"),

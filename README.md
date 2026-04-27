@@ -114,6 +114,13 @@ Important clarification:
 4. Start the local control plane with `npm run dev:local`
 5. Start the desktop shell with `npm run dev:desktop`
 
+Local configuration behavior:
+
+- the app now ships with recommended defaults for local runtime root, workspace root, output directory, artifact directory, and export directory
+- first launch opens a local setup flow so the user can accept or adjust those defaults
+- only required settings block task execution; optional paths are defaulted automatically and remain editable later through Settings
+- the local settings file lives outside the repo copy so renaming or duplicating the workspace does not silently break the default local runtime
+
 For Windows desktop development with a full D-drive local toolchain:
 
 1. `npm run setup:rust:local`
@@ -125,6 +132,7 @@ For Windows desktop development with a full D-drive local toolchain:
 7. `npm run tauri:dev`
 
 By default, these scripts now use `D:\apex-localdev` so Rust, Cargo targets, temp files, npm cache, and Playwright assets stay off a nearly full `C:` drive.
+If the user later changes the local runtime root through the desktop Settings flow, the new path is picked up by future desktop launches and local control plane restarts.
 They also force a more reliable Rust network profile for slow or unstable links:
 
 - `crates.io` sparse protocol

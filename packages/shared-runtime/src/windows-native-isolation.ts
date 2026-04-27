@@ -86,7 +86,7 @@ export function createWindowsJobObjectEnforcement(input: {
   const result: WindowsJobObjectEnforcementResult = {
     enforcement_id: createEntityId("wjobj"),
     process_id: input.process_id,
-    job_object_name: `Apex_Sandbox_${input.sandbox_tier}_${Date.now()}`,
+    job_object_name: `CompanyBrain_Sandbox_${input.sandbox_tier}_${Date.now()}`,
     memory_limit_mb: memoryLimit,
     cpu_limit_percent: cpuLimit,
     time_limit_ms: timeLimit,

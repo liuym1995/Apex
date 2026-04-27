@@ -5,6 +5,7 @@ const rootDir = resolvePath(join(fileURLToPath(new URL(".", import.meta.url)), "
 const distRoot = join(rootDir, "packages", "shared-local-core", "dist", "packages");
 
 const aliasMap = new Map([
+  ["@apex/shared-config", join(distRoot, "shared-config", "src", "index.js")],
   ["@apex/shared-local-core", join(distRoot, "shared-local-core", "src", "index.js")],
   ["@apex/shared-observability", join(distRoot, "shared-observability", "src", "index.js")],
   ["@apex/shared-runtime", join(distRoot, "shared-runtime", "src", "index.js")],

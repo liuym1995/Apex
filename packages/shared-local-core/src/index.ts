@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { basename, dirname, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import {
   addArtifact,
@@ -111,6 +111,7 @@ import {
   type TaskType,
   nowIso
 } from "@apex/shared-types";
+import { loadLocalAppSettings, resolveTaskDirectoryPaths } from "@apex/shared-config";
 
 export type LocalPermissionScope =
   | "local_files.read"
@@ -895,8 +896,22 @@ function getWorkspaceRoots(task: TaskContract): string[] {
   const requestedRoots = Array.isArray(task.inputs.workspace_paths)
     ? task.inputs.workspace_paths.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
     : [];
-  const roots = requestedRoots.length > 0 ? requestedRoots : [process.cwd()];
-  return [...new Set(roots.map(root => resolve(root)))];
+  if (requestedRoots.length > 0) {
+    return [...new Set(requestedRoots.map(root => resolve(root)))];
+  }
+  try {
+    const settings = loadLocalAppSettings();
+    const taskDirs = resolveTaskDirectoryPaths(settings, task.task_id);
+    return [...new Set([
+      resolve(settings.workspace_root),
+      resolve(settings.default_write_root),
+      resolve(settings.default_export_dir),
+      resolve(taskDirs.task_workdir),
+      resolve(taskDirs.task_run_dir)
+    ])];
+  } catch {
+    return [process.cwd()];
+  }
 }
 
 function ensurePathWithinRoots(task: TaskContract, requestedPath?: string): string {
@@ -912,6 +927,46 @@ function ensurePathWithinRoots(task: TaskContract, requestedPath?: string): stri
   }
 
   return resolvedPath;
+}
+
+function resolveWritePath(task: TaskContract, requestedPath: string): string {
+  if (isAbsolute(requestedPath)) return requestedPath;
+  try {
+    const settings = loadLocalAppSettings();
+    return resolve(settings.default_write_root, requestedPath);
+  } catch {
+    return resolve(requestedPath);
+  }
+}
+
+function resolveExportPath(requestedPath?: string): string {
+  if (requestedPath && isAbsolute(requestedPath)) return requestedPath;
+  try {
+    const settings = loadLocalAppSettings();
+    return resolve(settings.default_export_dir, requestedPath ?? "");
+  } catch {
+    return resolve(requestedPath ?? process.cwd());
+  }
+}
+
+function resolveVerificationEvidencePath(taskId: string, filename: string): string {
+  try {
+    const settings = loadLocalAppSettings();
+    const taskDirs = resolveTaskDirectoryPaths(settings, taskId);
+    return resolve(taskDirs.task_verification_dir, filename);
+  } catch {
+    return resolve(filename);
+  }
+}
+
+function resolveTaskRunPath(taskId: string, filename: string): string {
+  try {
+    const settings = loadLocalAppSettings();
+    const taskDirs = resolveTaskDirectoryPaths(settings, taskId);
+    return resolve(taskDirs.task_run_dir, filename);
+  } catch {
+    return resolve(filename);
+  }
 }
 
 function sanitizeShellCommand(command: string): string {
@@ -2443,7 +2498,7 @@ export function writeLocalFile(input: {
     return { status: "approval_required", permission };
   }
 
-  const path = ensurePathWithinRoots(task, input.path);
+  const path = ensurePathWithinRoots(task, resolveWritePath(task, input.path));
   const idempotencyKey = buildToolIdempotencyKey("local_fs_write", { path, content: input.content });
   const priorInvocation = findSuccessfulInvocationByIdempotency(input.taskId, "local_fs_write", idempotencyKey);
   if (priorInvocation) {
@@ -3340,6 +3395,27 @@ export function createLocalTask(input: {
     deadline_or_sla?: string;
   };
 }) {
+  let enrichedInputs = input.inputs ?? {};
+  try {
+    const settings = loadLocalAppSettings();
+    const taskDirs = resolveTaskDirectoryPaths(settings, "__pending__");
+    enrichedInputs = {
+      workspace_paths: [
+        settings.workspace_root,
+        settings.default_write_root,
+        settings.default_export_dir,
+        taskDirs.task_workdir.replace("__pending__", ""),
+        taskDirs.task_run_dir.replace("__pending__", "")
+      ],
+      default_task_workdir: settings.default_task_workdir,
+      default_write_root: settings.default_write_root,
+      default_export_dir: settings.default_export_dir,
+      verification_evidence_dir: settings.verification_evidence_dir,
+      task_run_dir: settings.task_run_dir,
+      ...enrichedInputs
+    };
+  } catch {}
+
   const task = buildDefaultTask({
     task_type: input.taskType ?? "one_off",
     intent: input.intent,
@@ -3350,12 +3426,21 @@ export function createLocalTask(input: {
       user_id: "local_user",
       channel: input.channel ?? "desktop-shell"
     },
-    inputs: input.inputs ?? {},
+    inputs: enrichedInputs,
     definition_of_done: input.definitionOfDone
   });
   task.status = "queued";
   task.timestamps.updated_at = nowIso();
   store.tasks.set(task.task_id, task);
+
+  try {
+    const settings = loadLocalAppSettings();
+    const taskDirs = resolveTaskDirectoryPaths(settings, task.task_id);
+    mkdirSync(taskDirs.task_workdir, { recursive: true });
+    mkdirSync(taskDirs.task_run_dir, { recursive: true });
+    mkdirSync(taskDirs.task_verification_dir, { recursive: true });
+  } catch {}
+
   return task;
 }
 

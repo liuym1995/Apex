@@ -496,6 +496,44 @@ export async function callLLM(options: LLMCallOptions): Promise<LLMCallResult> {
     return errorResult;
   }
 
+  if (options.task_id) {
+    try {
+      const { getBudgetStatusForTask } = await import("./task-budget.js");
+      const budgetStatus = getBudgetStatusForTask(options.task_id);
+      if (budgetStatus && budgetStatus.budget_exhausted) {
+        const budgetResult: LLMCallResult = {
+          request_id: createEntityId("mrq"),
+          route_id: route.route_id,
+          model_alias: options.model_alias,
+          provider: route.provider,
+          model_id: route.model_id,
+          content: "",
+          structured_output: null,
+          input_tokens: 0,
+          output_tokens: 0,
+          cost_usd: 0,
+          latency_ms: 0,
+          status: "error",
+          retry_count: 0,
+          error_message: `Budget exhausted for task '${options.task_id}'. Hard limit: $${budgetStatus.hard_limit.toFixed(2)}, spent: $${budgetStatus.estimated_cost.toFixed(2)}`,
+          validation_passed: false,
+          validation_errors: []
+        };
+        recordModelRequest({
+          route_id: route.route_id,
+          task_id: options.task_id,
+          model_alias: options.model_alias,
+          provider: route.provider,
+          model_id: route.model_id,
+          privacy_level: options.privacy_level,
+          status: "error",
+          error_message: budgetResult.error_message
+        });
+        return budgetResult;
+      }
+    } catch {}
+  }
+
   let lastError: string | undefined;
   let retryCount = 0;
 
@@ -604,6 +642,19 @@ export async function callLLM(options: LLMCallOptions): Promise<LLMCallResult> {
       const costUsd = calculateCost(route.provider, parsed.input_tokens, parsed.output_tokens);
 
       recordQuotaUsage(route.provider, parsed.input_tokens + parsed.output_tokens, costUsd);
+
+      if (options.task_id) {
+        try {
+          const { trackModelSpend } = await import("./task-budget.js");
+          trackModelSpend({
+            task_id: options.task_id,
+            provider: route.provider,
+            model: route.model_id,
+            input_tokens: parsed.input_tokens,
+            output_tokens: parsed.output_tokens
+          });
+        } catch {}
+      }
 
       recordModelRequest({
         route_id: route.route_id,

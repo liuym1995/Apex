@@ -47,7 +47,7 @@ export function createRealJobObjectEnforcement(input: {
 
   const enforcement: RealJobObjectEnforcement = {
     enforcement_id: createEntityId("wjoreal"),
-    job_name: `Apex_Sandbox_${input.sandbox_tier}_${Date.now()}`,
+    job_name: `CompanyBrain_Sandbox_${input.sandbox_tier}_${Date.now()}`,
     memory_limit_bytes: (input.memory_limit_mb ?? defaults.memory_limit_mb) * 1024 * 1024,
     process_memory_limit_bytes: (input.process_memory_limit_mb ?? defaults.process_memory_limit_mb) * 1024 * 1024,
     active_process_limit: input.active_process_limit ?? defaults.active_process_limit,

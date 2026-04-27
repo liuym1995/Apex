@@ -49,6 +49,14 @@ Should show:
 
 This is the primary identity block for the task.
 
+The same header area should also expose compact runtime controls when available:
+
+- current task working directory
+- default write root
+- default export directory
+- current task budget status
+- active subagent count vs effective cap
+
 ### 3.2 Definition of Done
 
 Should show:
@@ -69,6 +77,8 @@ Should show:
 - ordered steps
 - current step status
 - step owners when available
+- assignment lease state when delegated execution is active
+- delegation depth when applicable
 
 This section answers:
 
@@ -107,6 +117,12 @@ Should show:
 - a dedicated `Reuse Improvement` card for reuse-governance tasks, including the affected reusable asset, suggested learning action, target improvement hints, and a direct jump back to that asset
 - a `Runtime Boundaries` card that makes the current `session / harness / sandbox` state visible, including compaction strategy, planning mode, guarded scopes, and current isolation tier
 - an `Agent Team` card that makes delegated runtime structure visible, including team mode, isolated context count, subagent sessions, and compact supervisor/worker message summaries
+- effective multi-agent limits, including:
+  - current policy mode (`auto` vs `manual`)
+  - effective parallel subagent cap
+  - max total subagents per task
+  - max delegation depth
+- compact resource-policy diagnostics showing the detected machine envelope and the current `20%` reserve rule when auto mode is active
 - resume support visibility for the team and each delegated session, so future delegated resume can be audited before it is fully automated
 - delegated checkpoint visibility, so operators can see the latest capability-routing, execution, verification, and learning-curation milestones per team
 - delegated handoff visibility and a merged team timeline, so operators can inspect how the supervisor routed work from capability resolution into execution, verification, and learning
@@ -169,6 +185,21 @@ For promoted bundle operations, the workspace should also let the user specify a
 
 This keeps skill release and distribution explainable from the same surface where users already review skills.
 
+The workspace should also expose acceptance and budget state as first-class operator surfaces:
+
+- `Acceptance` card
+  - acceptance agent verdict
+  - acceptance findings
+  - missing items
+  - suggested rerun scope
+- `Budget` card
+  - configured hard limit
+  - current spend
+  - warning threshold
+  - last model/provider contributors
+  - paused-by-budget state
+  - explicit continue / raise-budget action
+
 The same panel should also show a short bundle activity feed so users can inspect recent:
 
 - bundle export events
@@ -229,6 +260,25 @@ The same area should also support a lightweight policy dry-run for bundle files:
 - inspect which trust/content/role rules would allow or block the action
 
 This gives operators a safe preflight before a real verify or import call.
+
+The general settings surface should also include:
+
+- workspace root
+- default task working directory
+- default write root
+- default export directory
+- artifact directory
+- verification evidence directory
+- task run directory
+- subagent resource mode
+- CPU reserve ratio
+- memory reserve ratio
+- max parallel subagents
+- max total subagents per task
+- max delegation depth
+- default task budget policy
+
+Only truly required settings should block task execution.
 
 For teams that actively manage local governance, the same workspace area should also expose a scoped policy editor:
 

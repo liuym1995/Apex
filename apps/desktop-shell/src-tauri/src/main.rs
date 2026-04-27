@@ -815,6 +815,14 @@ fn spawn_local_control_plane(
     command
         .args(&plan.args)
         .current_dir(&plan.cwd)
+        .env(
+            "APEX_LOCAL_DEV_ROOT",
+            effective_local_dev_root(),
+        )
+        .env(
+            "APEX_LOCAL_DB_PATH",
+            effective_local_db_path(),
+        )
         .stdout(Stdio::from(stdout_log))
         .stderr(Stdio::from(stderr_log));
 
@@ -921,6 +929,105 @@ fn path_to_string(path: &Path) -> String {
 
 fn auto_restart_enabled(mode: &str) -> bool {
     mode == "external_command" || mode == "repo_node_companion" || mode == "packaged_node_companion"
+}
+
+fn resolve_local_settings_path() -> PathBuf {
+    if let Some(explicit) = env::var("APEX_LOCAL_SETTINGS_PATH")
+        .ok()
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+    {
+        return PathBuf::from(explicit);
+    }
+
+    if cfg!(target_os = "windows") {
+        let base = env::var("LOCALAPPDATA")
+            .ok()
+            .filter(|item| !item.trim().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                let mut path = home_dir_fallback();
+                path.push("AppData");
+                path.push("Local");
+                path
+            });
+        return base.join("CompanyBrain").join("app-settings.json");
+    }
+
+    if let Some(xdg) = env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|item| !item.trim().is_empty())
+        .map(PathBuf::from)
+    {
+        return xdg.join("apex").join("app-settings.json");
+    }
+
+    home_dir_fallback()
+        .join(".config")
+        .join("apex")
+        .join("app-settings.json")
+}
+
+fn home_dir_fallback() -> PathBuf {
+    env::var("HOME")
+        .ok()
+        .filter(|item| !item.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| env::var("USERPROFILE").ok().map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn read_saved_local_setting(key: &str) -> Option<String> {
+    let path = resolve_local_settings_path();
+    let content = fs::read_to_string(path).ok()?;
+    let parsed = serde_json::from_str::<serde_json::Value>(&content).ok()?;
+    parsed
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn effective_local_dev_root() -> String {
+    if let Some(explicit) = env::var("APEX_LOCAL_DEV_ROOT")
+        .ok()
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+    {
+        return explicit;
+    }
+
+    if let Some(saved) = read_saved_local_setting("local_dev_root") {
+        return saved;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        return r"D:\apex-localdev".to_string();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        return env::temp_dir()
+            .join("apex-localdev")
+            .to_string_lossy()
+            .to_string();
+    }
+}
+
+fn effective_local_db_path() -> String {
+    if let Some(explicit) = env::var("APEX_LOCAL_DB_PATH")
+        .ok()
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+    {
+        return explicit;
+    }
+
+    PathBuf::from(effective_local_dev_root())
+        .join("data")
+        .join("local-control-plane.sqlite")
+        .to_string_lossy()
+        .to_string()
 }
 
 fn current_restart_attempts(manager: &LocalControlPlaneManager) -> u32 {
@@ -1184,17 +1291,7 @@ fn now_millis() -> u128 {
 }
 
 fn default_log_root() -> PathBuf {
-    if let Ok(root) = env::var("APEX_LOCAL_DEV_ROOT") {
-        return PathBuf::from(root).join("logs");
-    }
-    #[cfg(target_os = "windows")]
-    {
-        return PathBuf::from(r"D:\apex-localdev").join("logs");
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        return env::temp_dir().join("apex-localdev").join("logs");
-    }
+    PathBuf::from(effective_local_dev_root()).join("logs")
 }
 
 fn read_tail_lines(path: &Path, max_lines: usize) -> Vec<String> {

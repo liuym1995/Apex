@@ -29,6 +29,8 @@ Use this file as the fastest navigation entry when you need a topic-specific exp
   - authority order, vocabulary normalization, and current-vs-target document rules
 - [`./external-pattern-adoption.md`](./external-pattern-adoption.md)
   - detailed landing guide for Hermes, Claude/Codex, AutoResearch, Karpathy wiki, In-Place TTT, EvoMap, and AI Scientist ideas
+- [`./hermes-self-evolution-and-clawhub-adoption.md`](./hermes-self-evolution-and-clawhub-adoption.md)
+  - focused landing guide for surpassing Hermes-style self-evolution and adding live ClawHub registry adoption without replacing the current backbone
 - [`./best-practice-reset-plan.md`](./best-practice-reset-plan.md)
   - best-practice reset plan for upgrading the target architecture without compatibility constraints
 - [`./glm-5.1-architecture-execution-spec.md`](./glm-5.1-architecture-execution-spec.md)
@@ -69,6 +71,18 @@ Use this file as the fastest navigation entry when you need a topic-specific exp
   - final repo-local handoff for admin-blocked and resource-blocked preparation work after live rollout reaches non-admin limits
 - [`./glm-5.1-resource-gated-resume-spec.md`](./glm-5.1-resource-gated-resume-spec.md)
   - final resume handoff for continuing only when real resources become available
+- [`./glm-5.1-settings-subagents-acceptance-budget-spec.md`](./glm-5.1-settings-subagents-acceptance-budget-spec.md)
+  - continuous handoff for wiring settings defaults into runtime behavior, bounding multi-agent execution, formalizing the acceptance-agent boundary, and adding hard budget enforcement
+- [`./glm-5.1-post-contract-integration-spec.md`](./glm-5.1-post-contract-integration-spec.md)
+  - continuous handoff for integrating the new settings, multi-agent, acceptance, and budget contracts into real APIs, task execution, workspace UI, and verification paths
+- [`./glm-5.1-final-local-closure-spec.md`](./glm-5.1-final-local-closure-spec.md)
+  - final locally achievable closure handoff for wiring dispatch leasing into delegated execution, automatic subagent envelopes into handoff, and budget interruption into the real operator flow
+- [`./glm-5.1-external-completion-master-spec.md`](./glm-5.1-external-completion-master-spec.md)
+  - permanent continuation handoff after final local closure, used to activate only real external lanes as resources arrive until the whole product is complete
+- [`./glm-5.1-hermes-clawhub-spec.md`](./glm-5.1-hermes-clawhub-spec.md)
+  - continuous handoff for upgrading the repository toward live Hermes-style self-evolution and live OpenClaw ClawHub registry compatibility
+- [`./glm-5.1-unified-final-completion-spec.md`](./glm-5.1-unified-final-completion-spec.md)
+  - unified final continuation handoff: finish the Hermes/ClawHub local enhancement wave first, then fall through into the resource-gated external activation master flow
 - [`./current-architecture-status.md`](./current-architecture-status.md)
   - current repository status map with `implemented / partial / not implemented` boundaries
 - [`../README.md`](../README.md)
@@ -92,6 +106,8 @@ Use this file as the fastest navigation entry when you need a topic-specific exp
 
 - [`./local-permission-and-tooling.md`](./local-permission-and-tooling.md)
   - local permissions, tool safety, staged machine-control rollout
+- [`./local-settings-and-runtime-defaults.md`](./local-settings-and-runtime-defaults.md)
+  - local settings model, required-vs-default path behavior, and runtime default directory rules
 - [`./computer-use-runtime.md`](./computer-use-runtime.md)
   - dedicated computer-use runtime architecture, provider matrix, fallback order, and implementation boundary
 - [`./desktop-workspace-ui.md`](./desktop-workspace-ui.md)
@@ -109,6 +125,8 @@ Use this file as the fastest navigation entry when you need a topic-specific exp
   - deployment modes, environments, and rollout guidance
 - [`./observability-and-operations.md`](./observability-and-operations.md)
   - operational visibility, monitoring, and dashboards
+- [`./multi-agent-governance-and-budgeting.md`](./multi-agent-governance-and-budgeting.md)
+  - supervisor/subagent governance, acceptance-agent boundary, and task budget enforcement model
 - [`./runtime-improvements-roadmap.md`](./runtime-improvements-roadmap.md)
   - phased roadmap for session/harness/sandbox separation, compaction, subagents, sandboxing, and cloud augmentation
 

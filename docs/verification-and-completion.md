@@ -107,6 +107,27 @@ It answers questions like:
 The verifier should not replace deterministic checks.
 It should complement them.
 
+Best-practice clarification:
+
+- the verifier should be treated as a dedicated `Acceptance Agent` boundary
+- it should be logically separate from the execution agent or supervisor
+- it should consume a compact acceptance package rather than the executor's full private scratchpad by default
+- it should produce a structured acceptance verdict package, not just free-form commentary
+
+The preferred acceptance outputs are:
+
+- `accepted`
+- `accepted_with_notes`
+- `revise_and_retry`
+- `blocked`
+
+The stricter target architecture therefore uses:
+
+- deterministic checks first
+- acceptance-agent semantic review second
+- reconciliation third
+- done gate last
+
 ## 7. Reconciliation Engine
 
 The reconciliation engine checks real-world or external-state truth.
@@ -127,7 +148,7 @@ The done gate is the final completion authority.
 It should decide completion only after inspecting:
 
 - checklist result
-- verifier result
+- verifier / acceptance-agent result
 - reconciliation result
 - policy conditions
 
@@ -140,7 +161,7 @@ The runtime should only mark a task complete when:
 - required artifacts exist
 - required checks pass
 - reconciliation passes
-- verifier returns a passing verdict
+- verifier / acceptance agent returns a passing verdict
 - no blocking policy issue remains
 
 This is a hard rule.
@@ -187,6 +208,7 @@ It is not allowed to get faster by:
 
 - skipping checklist
 - skipping verifier review
+- collapsing executor and acceptance review into one implicit "done" claim
 - skipping reconciliation
 - skipping done gate
 
@@ -205,6 +227,8 @@ The intended path is:
 5. task template is promoted or updated
 
 This means verification gates not only completion, but also future reuse quality.
+
+The acceptance agent is valuable, but it should not be the only source of truth.
 
 ## 13. Failure Handling
 

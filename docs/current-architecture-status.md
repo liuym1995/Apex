@@ -45,8 +45,8 @@ It is not yet:
 
 | Area | Status | Current reality |
 | --- | --- | --- |
-| Desktop shell | Implemented | Tauri desktop shell, task workspace, deep links, notifications, control-plane supervision, operational views |
-| Local control plane | Implemented | Fastify-based local API for tasks, workspace, tools, skills, policy, governance, delegated runtime actions |
+| Desktop shell | Implemented | Tauri desktop shell, task workspace, deep links, notifications, control-plane supervision, operational views, acceptance/budget/multi-agent-limits cards, advanced settings for delegation and budget policy |
+| Local control plane | Implemented | Fastify-based local API for tasks, workspace, tools, skills, policy, governance, delegated runtime actions, local app settings/status, delegation policy, budget policy, dispatch plan leasing, subagent envelopes, acceptance review, budget status/continue |
 | Typed contracts and shared runtime | Implemented | shared types, shared runtime, shared local core, shared state, explicit lifecycle and verification contracts |
 | Local persistence | Implemented | SQLite-backed state boundary behind the shared-state adapter |
 | Verification stack | Implemented | checklist, verifier, reconciliation, done gate |
@@ -54,7 +54,8 @@ It is not yet:
 | Local machine-control adapters | Implemented | filesystem, patch, rollback, shell, browser snapshot/session, IDE summary |
 | Computer Use Runtime | Implemented | screenshot capture, accessibility tree (Win/macOS/Linux), OCR provider SPI, mouse/keyboard executor, see-act-verify-recover loop, verification evidence + confidence scoring, screenshot diff, human takeover/stop/replay, session recording (structured + frame-based + video encoding), local app invoke (hardened), multi-display (Win/macOS/Linux), browser perception (Chromium/Firefox/WebKit), platform diagnostics and self-check, OS-level hard sandboxing with tier-based action matrix, Windows-first smoke/E2E/regression test chain |
 | External business connectors | Implemented | `http_json_fetch`, `crm_contact_lookup`, `hr_candidate_lookup`, `finance_reconcile` |
-| Skill interoperability and governance | Implemented | OpenClaw / Claude / OpenAI importers, canonical registry, governance, bundle import/export/verify |
+| Skill interoperability and governance | Implemented | OpenClaw / Claude / OpenAI importers, canonical registry, governance, bundle import/export/verify, ClawHub registry adapter boundary, remote skill trust/governance flows |
+| Self-evolution pipeline | Implemented | Evolution run contracts, candidate generation from real signals, replay/regression/budget gates, integration with learning factory, workspace panel, API routes |
 | Policy center and governance workflow | Implemented | scoped policy files, proposals, approval/apply flow, environment compare, rollback, bundle flow |
 | Delegated runtime lifecycle contracts | Partial | execution run to runtime binding/instance/launch/adapter/backend/driver/runner/job chain exists |
 | Scheduling and recurring baseline | Partial | schedule entities and trigger flow exist, but not a full durable enterprise scheduler |
@@ -76,6 +77,8 @@ Implemented now:
 
 - Tauri desktop shell scaffold
 - task-first workspace UI
+- first-run local setup and later Settings flow for runtime/workspace/output/artifact/export directories
+- required-vs-optional local configuration behavior, with recommended defaults and blocking prompts only for required settings
 - task actions: prepare, run, verify, stop, resume
 - local control plane supervision from the desktop shell
 - deep-link protocol for task, inbox, policy, execution-template, and learned-playbook targets
@@ -97,6 +100,7 @@ Implemented now:
 
 - local task CRUD and lifecycle endpoints
 - workspace aggregation endpoint
+- local settings status endpoint with defaulted path resolution, required-setting validation, and persisted updates
 - local tool endpoints
 - external connector proxy endpoints
 - skill registry import/export/governance endpoints
@@ -1386,6 +1390,127 @@ The current repository is already strong in:
 - TTT Specialist Lane: gated specialist lane with 10-check gate, replay-eval, proven-gains-only promotion
 - Post-Frontier Activation Verification: preflight truth refresh, orchestration/sandbox/TTT/observability/host validation connectivity checks
 - Production Honesty Pass: unified assessment with live_now/boundary_only/privilege_blocked/host_blocked classification
+- Settings-Backed Directory Defaults: default_task_workdir, default_write_root, default_export_dir, verification_evidence_dir, task_run_dir wired into LocalAppSettings with resolveTaskDirectoryPaths
+- Multi-Agent Resource Policy: DelegationPolicySettings with auto/manual mode, cpu_reserve_ratio=0.2, memory_reserve_ratio=0.2, max_parallel=4, max_total_per_task=8, max_depth=2, machine-resource-derived effective concurrency
+- Dispatch Plan Leasing: AgentDispatchPlan, AgentDispatchStep, SubagentAssignment, AssignmentLease with one-active-lease-per-step, supervisor-only assignment, max-depth/total/parallel enforcement
+- Subagent Context Envelopes: SubagentContextEnvelope and SubagentResultEnvelope for scoped handoffs (step goal, allowed tools, relevant artifacts, policy slice, definition of done)
+- Acceptance Agent Boundary: AcceptanceReview, AcceptanceVerdict, AcceptanceFinding with deterministic-first, semantic-second, risk-based escalation, completion path (checklist → acceptance → reconciliation → done gate)
+- Task Budget Contracts: ModelPricingRegistry, TaskBudgetPolicy, TaskBudgetStatus, BudgetInterruptionEvent with hard-stop pause, warning threshold, user continuation (new limit / extension / stop)
+
+### 4.14 Post-Contract Integration
+
+Status: `Implemented`
+
+The typed contracts from the Settings/Subagents/Acceptance/Budget wave are now wired end-to-end:
+
+- Settings End-To-End: 5 new directory defaults (default_task_workdir, default_write_root, default_export_dir, verification_evidence_dir, task_run_dir) surfaced in desktop settings panels with validation, smart cascading updates, and restart/no-restart labels
+- Advanced Settings: Delegation policy (resource mode, CPU/memory reserve, max parallel/total/depth) and budget policy (hard limit, warning threshold, on_limit_reached) editable from desktop settings UI
+- Settings Into Task Behavior: createLocalTask injects workspace_paths from settings, writeLocalFile resolves relative paths to default_write_root, export routes default to default_export_dir, resolveVerificationEvidencePath and resolveTaskRunPath route to correct directories
+- Control-Plane API Routes: GET/POST /api/local/settings/delegation-policy, GET/POST /api/local/settings/budget-policy, GET /api/local/dispatch-plans/:planId, POST /api/local/dispatch-plans, POST dispatch step assign/release/activate, GET /api/local/subagent-envelopes/:taskId, GET /api/local/acceptance/:taskId, POST /api/local/acceptance/:taskId/review, GET /api/local/budget/:taskId, POST /api/local/budget/:taskId/continue
+- Task Pipeline Integration: Budget pre-check in callLLM (blocks when exhausted), budget tracking after successful LLM call, acceptance review inserted between evidence evaluation and done gate in runTaskEndToEnd, budget initialization at task run start
+- Workspace UI: AcceptanceCard (verdict, findings, completion path), BudgetCard (spend bar, hard limit, pause/continue actions), MultiAgentLimitsCard (effective limits, machine resources, clamped-by)
+- Smoke Tests: Settings new dir fields, delegation policy, budget policy, acceptance completion path, budget status, dispatch plan creation verified in smoke-test.mjs
+
+### 4.15 Final Local Closure
+
+Status: `Implemented`
+
+The remaining gaps between typed contracts and real product integration have been closed:
+
+- Dispatch Leasing In Real Execution Path: `createDispatchLeaseForDelegation` is called during `runTaskEndToEnd` execution step, creating a real dispatch plan, step, assignment, and lease for the execution worker; `releaseDispatchLeaseForSession` is called on completion, auto-creating a result envelope and linking it to the dispatch step; `createWorkerSessionWithOwnership` receives `dispatch_lease_context` and stores `dispatch_lease_id`/`dispatch_plan_id` on the session; `AgentTeamSummarySchema` includes `dispatch_plan_id`; `buildTaskAgentTeamState` reuses existing dispatch plans via `getDispatchPlanForTask`; duplicate active leases per step are prevented; `releaseLeaseWithCleanup` and `forceCleanupForTask` release dispatch leases on session termination
+- Subagent Context Envelopes Auto-Created During Handoff: `createDispatchLeaseForDelegation` auto-creates a `SubagentContextEnvelope` with step goal, policy slice (max parallel, max depth, budget limit), tools, sandbox tiers, and definition of done; `releaseDispatchLeaseForSession` auto-creates a `SubagentResultEnvelope` with status, summary, and blockers; envelopes are persisted in module-level storage with retrieval functions (`getContextEnvelopesForTask`, `getResultEnvelopesForTask`, `getContextEnvelopesForStep`, `getResultEnvelopesForStep`); API route `/api/local/subagent-envelopes/:taskId` retrieves auto-created envelopes
+- Budget Interruption As Complete Workspace/Operator Flow: `BudgetStatusPanelState` extended with `interruption_kind`, `task_paused_by_budget`, `spend_at_interruption`, `limit_at_interruption`; `buildBudgetStatusPanelState` checks real interruption events via `getPendingInterruptionForTask`; Budget API route returns full interruption-aware status; BudgetCard shows clear budget-paused banner with spend/limit, explicit raise-limit input, one-time extension input, stop button; 5-second auto-refresh for near-real-time updates; CSS for budget-paused state, action rows, danger button
+- ESM Import Cleanup: All `require()` calls in `index.ts` replaced with static imports (acceptance-agent, delegated-runtime-hardening, dispatch-plan-leasing, task-budget, hybrid-memory-ttt); `delegated-runtime-hardening.ts` uses static imports instead of `require()` for subagent-envelopes, delegation-policy, task-budget, dispatch-plan-leasing
+- Regression Coverage: Smoke test covers dispatch lease creation, plan reuse, context envelope auto-creation, result envelope auto-creation, budget pause/resume with raise-limit, acceptance gates, completion path status
+
+### 4.16 External Completion — Resource Truth Probe (2026-04-26)
+
+Status: `All lanes blocked — no newly unlocked external resources`
+
+Resource truth probe results:
+
+| Resource | Status | Detail |
+|----------|--------|--------|
+| Administrator privilege | `blocked` | `net session` returns ERROR 5 (Access Denied) — current session is non-elevated |
+| Docker | `not_installed` | `docker` not found in PATH |
+| Podman | `not_installed` | `podman` not found in PATH |
+| Hyper-V | `privilege_blocked` | `Get-WindowsOptionalFeature` requires elevation |
+| WSL2 | `broken` | Ubuntu distro registered (WSL2) but fails to start: HCS/ERROR_FILE_NOT_FOUND on ext4.vhdx mount — virtual disk is missing or corrupted |
+| Ollama | `not_installed` | `ollama` not found in PATH |
+| Temporal | `not_installed` | `temporal` not found in PATH |
+| LangGraph | `not_installed` | No LangGraph runtime detected |
+| DATABASE_URL | `not_set` | Environment variable empty |
+| OTEL endpoint | `not_set` | `OTEL_EXPORTER_OTLP_ENDPOINT` empty |
+| macOS host | `not_available` | Current host is Windows |
+| Linux host | `not_available` | WSL2 Ubuntu is broken (see above) |
+
+Lane classification per glm-5.1-external-completion-master-spec.md Section 5:
+
+| Lane | Priority | Classification | Blocking Resource |
+|------|----------|----------------|-------------------|
+| 5.1 Privileged Windows Isolation | P1 | `privilege_blocked` | Administrator privilege |
+| 5.2 Container/VM Isolation | P2 | `host_blocked` | Docker, Podman, Hyper-V, working WSL2 |
+| 5.3 Self-Hosted Model + TTT | P3 | `host_blocked` | Ollama or equivalent |
+| 5.4 Remote Orchestration | P4 | `host_blocked` | Temporal or LangGraph |
+| 5.5 Remote Persistence + Observability | P5 | `endpoint_blocked` | DATABASE_URL, OTEL endpoint |
+| 5.6 Cross-Platform Host Validation | P6 | `host_blocked` | macOS, Linux, or working WSL2 |
+| 5.7 Enterprise/Cloud Edge | P7 | `credential_blocked` | SSO credentials, DeerFlow endpoint |
+
+Current live-verified capabilities (already working, no new activation needed):
+
+- Windows Job Object sandbox provider: `live` — memory limits and process counts enforced for `guarded_mutation` tier
+- Rule-based sandbox provider: `live` — policy-only enforcement for all tiers
+- All local-first runtime, dispatch, envelopes, acceptance, budget flows: `live`
+
+### 4.17 Hermes/ClawHub Wave (2026-04-26)
+
+Status: `Implemented` (local-first boundary; external ClawHub endpoint not yet available)
+
+The Hermes self-evolution and ClawHub registry adapter wave has been landed:
+
+**P0: Live Evolution Run Contracts And Persistence** — `Implemented`
+- `SkillEvolutionRun`, `PromptEvolutionRun`, `ToolDescriptionEvolutionRun`, `EvolutionCandidate`, `EvolutionPromotionDecision`, `EvolutionRollbackRecord` typed Zod schemas in shared-types
+- Persistence maps in shared-state for all evolution entities
+- Full CRUD runtime in `evolution-runtime.ts`: create runs, add candidates, update status, record decisions, record rollbacks, get diagnostics
+
+**P1: Candidate Generation From Real Signals** — `Implemented`
+- `collectEvolutionSignals()` reads real signals from: failed learning factory pipelines, critical/open backlog items, error-state replay packages, budget interruptions
+- `generateEvolutionCandidatesFromSignals()` groups signals by target, creates evolution runs, generates candidates with averaged confidence
+- Signal kinds: `methodology_finding`, `replay_mismatch`, `budget_overrun`, `acceptance_failure`, `skill_gap`, `prompt_degradation`, `tool_misuse`
+
+**P2: Replay/Regression/Budget Gates For Evolution** — `Implemented`
+- `gateEvolutionCandidate()` checks: replay score >= threshold, regression passed, budget available, semantic preserved
+- `gateAllPendingCandidates()` batch gates all candidates with status `candidate_generated`
+- Unsuccessful candidates marked `gated_failed`; successful marked `gated_passed`
+- Governance review still required before promotion even after gating passes
+
+**P3: Evolution In Live Learning Factory** — `Implemented`
+- Evolution signal collection + candidate generation triggered automatically in `failLearningFactoryStage` and `advanceLearningFactoryStage` (pipeline completion)
+- `runEvolutionCycle()` convenience function: collect signals → generate candidates → gate all pending
+- `EvolutionStatusPanelState` in desktop-workspace with builder function
+- 6 API routes: `/api/local/evolution/diagnostics`, `/api/local/evolution/cycle`, `/api/local/evolution/candidates`, `/api/local/evolution/candidate/:id/gate`, `/api/local/evolution/candidate/:id/decision`, `/api/local/evolution/workspace-panel`
+
+**P4: Live ClawHub Registry Adapter Boundary** — `Implemented` (boundary-only; no live ClawHub endpoint)
+- `ClawHubRegistryConfig`, `ClawHubSearchResult`, `ClawHubInstallRecord`, `ClawHubPublishRecord`, `ClawHubSyncRecord`, `RemoteSkillTrustVerdict` typed Zod schemas in shared-types
+- Persistence maps in shared-state for all ClawHub entities
+- `clawhub-registry-adapter.ts` with: create/list configs, search skills (returns empty without endpoint), inspect skill, install skill (defaults to `pending_review`), publish skill (defaults to `pending_approval`), sync registry (fails honestly without endpoint), assess trust verdict, get diagnostics
+- 10 API routes covering all ClawHub operations
+- Key constraint: `searchClawHubSkills` returns empty array when no endpoint configured; `syncClawHubRegistry` records `failed` status with error; install/publish always require governance review
+
+**P5: Trust/Governance/Workspace Flows For Remote Skills** — `Implemented`
+- `RemoteSkillReviewPanelState` in desktop-workspace with builder showing pending reviews and recent verdicts
+- `buildRemoteSkillReviewPanelState()` combines install records with trust verdicts
+- 4 governance API routes: review panel, install approve/reject, publish approve
+- Trust verdicts: `untrusted` / `conditional` / `trusted` based on publisher verification + compatibility + policy compliance
+- Key constraint: `governance_review_required` is always `true` regardless of trust level; no auto-activation of remote skills
+
+**P6: Final Verification** — `Implemented`
+- All 4 packages typecheck clean: shared-types, shared-state, shared-runtime, local-control-plane
+- Smoke test covers: evolution run creation, candidate creation, gate behavior, diagnostics, cycle, panel state, API routes, ClawHub config/search/install/publish/sync/trust, governance approve/reject flows
+
+**What remains externally blocked:**
+- Live ClawHub endpoint: no real registry endpoint available; search returns empty, sync fails honestly
+- Live remote skill activation: boundary exists but no real external skills to activate
 
 ## 6. What Is Still Missing for the Final Product
 

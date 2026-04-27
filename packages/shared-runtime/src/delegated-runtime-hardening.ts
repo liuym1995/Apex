@@ -14,6 +14,27 @@ import {
   type CheckpointSnapshot
 } from "@apex/shared-types";
 import { recordAudit } from "./core.js";
+import {
+  createDispatchPlan,
+  addDispatchStep,
+  assignStepToSubagent,
+  releaseLease as releaseDispatchLease,
+  activatePlan,
+  getDispatchPlan,
+  getDispatchStep,
+  getDispatchPlanForTask,
+  getActiveLeaseForStep,
+  getDispatchLeaseById,
+  failDispatchStep,
+  updateStepResult,
+  type AgentDispatchPlan,
+  type AgentDispatchStep,
+  type SubagentAssignment,
+  type AssignmentLease
+} from "./dispatch-plan-leasing.js";
+import { buildSubagentContextEnvelope, buildSubagentResultEnvelope } from "./subagent-envelopes.js";
+import { loadDelegationPolicy, computeEffectiveDelegationLimits } from "./delegation-policy.js";
+import { getBudgetPolicyForTask } from "./task-budget.js";
 
 function recordSupervisionEvent(input: {
   sessionId: string;
@@ -33,6 +54,138 @@ function recordSupervisionEvent(input: {
   return event;
 }
 
+export interface DispatchLeaseContext {
+  plan: AgentDispatchPlan;
+  step: AgentDispatchStep;
+  assignment: SubagentAssignment;
+  lease: AssignmentLease;
+}
+
+export function createDispatchLeaseForDelegation(input: {
+  task_id: string;
+  supervisor_agent_id: string;
+  step_goal: string;
+  subagent_id: string;
+}): DispatchLeaseContext | { error: string } {
+  let plan = getDispatchPlanForTask(input.task_id);
+  if (!plan) {
+    plan = createDispatchPlan({
+      task_id: input.task_id,
+      supervisor_agent_id: input.supervisor_agent_id
+    });
+    activatePlan(plan.plan_id);
+  }
+
+  const stepResult = addDispatchStep({
+    plan_id: plan.plan_id,
+    goal: input.step_goal,
+    supervisor_agent_id: input.supervisor_agent_id
+  });
+  if ("error" in stepResult) return { error: stepResult.error };
+  const step = stepResult as AgentDispatchStep;
+
+  const existingLease = getActiveLeaseForStep(step.step_id);
+  if (existingLease) {
+    return { error: "Step already has an active lease. Duplicate assignment denied." };
+  }
+
+  const assignmentResult = assignStepToSubagent({
+    plan_id: plan.plan_id,
+    step_id: step.step_id,
+    agent_id: input.subagent_id,
+    supervisor_agent_id: input.supervisor_agent_id
+  });
+  if ("error" in assignmentResult) return { error: assignmentResult.error };
+  const assignment = assignmentResult as SubagentAssignment;
+
+  const updatedStep = getDispatchStep(step.step_id);
+  const leaseId = updatedStep?.lease_id;
+  if (!leaseId) return { error: "Lease not created during assignment" };
+
+  const lease = getDispatchLeaseById(leaseId);
+  if (!lease) return { error: "Lease not found after assignment" };
+
+  recordAudit("delegated_runtime.dispatch_lease_created", {
+    plan_id: plan.plan_id,
+    step_id: step.step_id,
+    assignment_id: assignment.assignment_id,
+    lease_id: leaseId,
+    task_id: input.task_id,
+    subagent_id: input.subagent_id
+  });
+
+  try {
+    const policy = loadDelegationPolicy();
+    const limits = computeEffectiveDelegationLimits(policy);
+    const budgetPolicy = getBudgetPolicyForTask(input.task_id);
+    const contextEnvelope = buildSubagentContextEnvelope({
+      plan_id: plan.plan_id,
+      step_id: step.step_id,
+      agent_id: input.subagent_id,
+      step_goal: input.step_goal,
+      allowed_tools: ["filesystem_read", "filesystem_write", "shell_exec"],
+      allowed_sandbox_tiers: ["host_readonly", "guarded_mutation"],
+      max_parallel_subagents: limits.effective_max_parallel,
+      max_delegation_depth: limits.effective_max_depth,
+      budget_limit: budgetPolicy?.hard_limit_amount,
+      definition_of_done: [`Complete: ${input.step_goal}`, "Produce evidence of completion"]
+    });
+    recordAudit("delegated_runtime.context_envelope_auto_created", {
+      envelope_id: contextEnvelope.envelope_id,
+      plan_id: plan.plan_id,
+      step_id: step.step_id,
+      subagent_id: input.subagent_id
+    });
+  } catch {}
+
+  return { plan, step: updatedStep ?? step, assignment, lease };
+}
+
+export function releaseDispatchLeaseForSession(leaseId: string, reason: "completed" | "failed" | "cancelled" = "completed"): AssignmentLease | { error: string } {
+  const result = releaseDispatchLease(leaseId);
+  if ("error" in result) return result;
+
+  const lease = result as AssignmentLease;
+
+  if (reason === "failed" || reason === "cancelled") {
+    const step = getDispatchStep(lease.step_id);
+    if (step) {
+      failDispatchStep(step.step_id, reason);
+    }
+  }
+
+  try {
+    const step = getDispatchStep(lease.step_id);
+    if (step) {
+      const resultEnvelope = buildSubagentResultEnvelope({
+        plan_id: lease.plan_id,
+        step_id: lease.step_id,
+        agent_id: lease.agent_id,
+        status: reason === "completed" ? "completed" : reason === "failed" ? "failed" : "blocked",
+        summary: reason === "completed"
+          ? `Subagent completed step: ${step.goal}`
+          : `Subagent ${reason} step: ${step.goal}`,
+        blockers: reason !== "completed" ? [reason] : []
+      });
+      updateStepResult({ step_id: step.step_id, agent_id: lease.agent_id, result_envelope_ref: resultEnvelope.envelope_id });
+      recordAudit("delegated_runtime.result_envelope_auto_created", {
+        envelope_id: resultEnvelope.envelope_id,
+        plan_id: lease.plan_id,
+        step_id: lease.step_id,
+        agent_id: lease.agent_id,
+        status: resultEnvelope.status
+      });
+    }
+  } catch {}
+
+  recordAudit("delegated_runtime.dispatch_lease_released", {
+    lease_id: leaseId,
+    reason
+  });
+
+  return result;
+}
+
 export function createWorkerSessionWithOwnership(input: {
   worker_id: string;
   task_id?: string;
@@ -42,6 +195,7 @@ export function createWorkerSessionWithOwnership(input: {
   supervision_policy?: WorkerSession["supervision_policy"];
   max_restarts?: number;
   lease_id?: string;
+  dispatch_lease_context?: DispatchLeaseContext;
 }): WorkerSession {
   const now = nowIso();
   const session = WorkerSessionSchema.parse({
@@ -62,6 +216,8 @@ export function createWorkerSessionWithOwnership(input: {
     stall_detected_at: undefined,
     orphaned_detected_at: undefined,
     lease_id: input.lease_id,
+    dispatch_lease_id: input.dispatch_lease_context?.lease.lease_id,
+    dispatch_plan_id: input.dispatch_lease_context?.plan.plan_id,
     supervision_policy: input.supervision_policy ?? "none",
     created_at: now
   });
@@ -73,7 +229,9 @@ export function createWorkerSessionWithOwnership(input: {
     task_id: input.task_id,
     attempt_id: input.attempt_id,
     owner_process_id: input.owner_process_id,
-    supervision_policy: session.supervision_policy
+    supervision_policy: session.supervision_policy,
+    dispatch_lease_id: input.dispatch_lease_context?.lease.lease_id,
+    dispatch_plan_id: input.dispatch_lease_context?.plan.plan_id
   });
 
   return session;
@@ -441,6 +599,10 @@ export function releaseLeaseWithCleanup(leaseId: string, reason?: string): Sandb
     linkedSession.terminated_at = nowIso();
     store.workerSessions.set(linkedSession.session_id, linkedSession);
 
+    if (linkedSession.dispatch_lease_id) {
+      try { releaseDispatchLeaseForSession(linkedSession.dispatch_lease_id, "completed"); } catch {}
+    }
+
     recordSupervisionEvent({
       sessionId: linkedSession.session_id,
       workerId: linkedSession.worker_id,
@@ -477,6 +639,10 @@ export function forceCleanupForTask(taskId: string): {
       session.terminated_at = nowIso();
       store.workerSessions.set(session.session_id, session);
       terminatedSessions.push(session);
+
+      if (session.dispatch_lease_id) {
+        try { releaseDispatchLeaseForSession(session.dispatch_lease_id, "cancelled"); } catch {}
+      }
 
       recordSupervisionEvent({
         sessionId: session.session_id,
@@ -572,12 +738,31 @@ export function runDelegatedRuntimeMaintenanceCycle(options?: {
   restarted_sessions: WorkerSession[];
   expired_leases: SandboxLease[];
 } {
-  const { enforceSandboxLeaseExpiry, detectExpiredWorkerSessions } = require("./index.js") as typeof import("./index.js");
+  const expiredSessions: WorkerSession[] = [];
+  const now = Date.now();
+  for (const session of store.workerSessions.values()) {
+    if (session.status !== "active" && session.status !== "idle") continue;
+    const lastHeartbeat = session.last_heartbeat_at ? Date.parse(session.last_heartbeat_at) : Date.parse(session.started_at);
+    if (now - lastHeartbeat > (options?.heartbeat_timeout_ms ?? 60000)) {
+      session.status = "expired";
+      session.terminated_at = nowIso();
+      store.workerSessions.set(session.session_id, session);
+      expiredSessions.push(session);
+      recordAudit("worker_session.expired", { session_id: session.session_id, worker_id: session.worker_id });
+    }
+  }
 
-  const expiredSessions = detectExpiredWorkerSessions(options?.heartbeat_timeout_ms ?? 60000);
+  const expiredLeases: SandboxLease[] = [];
+  for (const lease of store.sandboxLeases.values()) {
+    if (lease.status === "active" && lease.expires_at && Date.parse(lease.expires_at) < now) {
+      lease.status = "expired";
+      store.sandboxLeases.set(lease.lease_id, lease);
+      expiredLeases.push(lease);
+    }
+  }
+
   const stalledSessions = detectStalledSessions(options?.stall_timeout_ms ?? 120000);
   const orphanedSessions = detectOrphanedSessions(options?.orphan_timeout_ms ?? 300000);
-  const expiredLeases = enforceSandboxLeaseExpiry();
 
   const restartedSessions: WorkerSession[] = [];
   if (options?.auto_restart) {

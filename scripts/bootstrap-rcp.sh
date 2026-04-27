@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-echo "=== Apex Remote Control Plane Bootstrap ==="
+echo "=== Company Brain Remote Control Plane Bootstrap ==="
 echo "Repo root: $REPO_ROOT"
 
 echo ""
@@ -14,16 +14,16 @@ npm install
 
 echo ""
 echo "[2/5] Building shared packages..."
-npm run build -w @apex/shared-types 2>/dev/null || true
-npm run build -w @apex/shared-config 2>/dev/null || true
-npm run build -w @apex/shared-observability 2>/dev/null || true
-npm run build -w @apex/shared-auth 2>/dev/null || true
-npm run build -w @apex/shared-state 2>/dev/null || true
-npm run build -w @apex/shared-runtime 2>/dev/null || true
+npm run build -w @company-brain/shared-types 2>/dev/null || true
+npm run build -w @company-brain/shared-config 2>/dev/null || true
+npm run build -w @company-brain/shared-observability 2>/dev/null || true
+npm run build -w @company-brain/shared-auth 2>/dev/null || true
+npm run build -w @company-brain/shared-state 2>/dev/null || true
+npm run build -w @company-brain/shared-runtime 2>/dev/null || true
 
 echo ""
 echo "[3/5] Building remote-control-plane..."
-npm run build -w @apex/remote-control-plane 2>/dev/null || true
+npm run build -w @company-brain/remote-control-plane 2>/dev/null || true
 
 echo ""
 echo "[4/5] Checking environment..."
@@ -43,4 +43,4 @@ echo "  Port: ${PORT:-3020}"
 echo "  Database: ${DATABASE_URL}"
 echo ""
 
-npm run dev -w @apex/remote-control-plane
+npm run dev -w @company-brain/remote-control-plane

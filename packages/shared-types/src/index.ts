@@ -396,6 +396,7 @@ export const EventLedgerEntryKindSchema = z.enum([
   "evidence_node_produced",
   "evidence_node_verdict",
   "completion_engine_evaluated",
+  "acceptance_review_completed",
   "done_gate_evaluated",
   "memory_captured",
   "skill_candidate_created",
@@ -760,6 +761,193 @@ export const InboxItemStateSchema = z.object({
   status: z.enum(["open", "acknowledged", "resolved"]).default("open"),
   updated_at: z.string().datetime(),
   updated_by: z.string().optional()
+});
+
+export const EvolutionRunKindSchema = z.enum(["skill", "prompt", "tool_description", "routing_rule"]);
+export const EvolutionRunStatusSchema = z.enum(["candidate_generated", "gating", "gated_passed", "gated_failed", "promoted", "rolled_back", "rejected"]);
+export const EvolutionCandidateSchema = z.object({
+  candidate_id: z.string(),
+  evolution_run_id: z.string(),
+  kind: EvolutionRunKindSchema,
+  target_id: z.string(),
+  target_name: z.string(),
+  proposed_change: z.string(),
+  change_diff: z.string().optional(),
+  source_signals: z.array(z.string()).default([]),
+  confidence: z.number().min(0).max(1).default(0.5),
+  budget_used_usd: z.number().nonnegative().default(0),
+  replay_score: z.number().min(0).max(1).optional(),
+  regression_passed: z.boolean().optional(),
+  semantic_preserved: z.boolean().optional(),
+  status: EvolutionRunStatusSchema.default("candidate_generated"),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime().optional()
+});
+export const SkillEvolutionRunSchema = z.object({
+  run_id: z.string(),
+  skill_id: z.string(),
+  skill_name: z.string(),
+  trigger_signals: z.array(z.string()).default([]),
+  candidates: z.array(EvolutionCandidateSchema).default([]),
+  budget_allocated_usd: z.number().nonnegative().default(0.5),
+  budget_used_usd: z.number().nonnegative().default(0),
+  status: EvolutionRunStatusSchema.default("candidate_generated"),
+  trace_ids: z.array(z.string()).default([]),
+  acceptance_review_ids: z.array(z.string()).default([]),
+  finding_ids: z.array(z.string()).default([]),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime().optional(),
+  completed_at: z.string().datetime().optional()
+});
+export const PromptEvolutionRunSchema = z.object({
+  run_id: z.string(),
+  prompt_id: z.string(),
+  prompt_name: z.string(),
+  trigger_signals: z.array(z.string()).default([]),
+  candidates: z.array(EvolutionCandidateSchema).default([]),
+  budget_allocated_usd: z.number().nonnegative().default(0.3),
+  budget_used_usd: z.number().nonnegative().default(0),
+  status: EvolutionRunStatusSchema.default("candidate_generated"),
+  trace_ids: z.array(z.string()).default([]),
+  acceptance_review_ids: z.array(z.string()).default([]),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime().optional(),
+  completed_at: z.string().datetime().optional()
+});
+export const ToolDescriptionEvolutionRunSchema = z.object({
+  run_id: z.string(),
+  tool_id: z.string(),
+  tool_name: z.string(),
+  trigger_signals: z.array(z.string()).default([]),
+  candidates: z.array(EvolutionCandidateSchema).default([]),
+  budget_allocated_usd: z.number().nonnegative().default(0.2),
+  budget_used_usd: z.number().nonnegative().default(0),
+  status: EvolutionRunStatusSchema.default("candidate_generated"),
+  trace_ids: z.array(z.string()).default([]),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime().optional(),
+  completed_at: z.string().datetime().optional()
+});
+export const EvolutionPromotionDecisionSchema = z.object({
+  decision_id: z.string(),
+  candidate_id: z.string(),
+  evolution_run_id: z.string(),
+  decision: z.enum(["promote", "reject", "rollback", "defer"]),
+  reason: z.string(),
+  replay_score: z.number().min(0).max(1).optional(),
+  regression_passed: z.boolean().optional(),
+  budget_impact_usd: z.number().nonnegative().default(0),
+  governance_review_required: z.boolean().default(true),
+  reviewed_by: z.string().optional(),
+  reviewed_at: z.string().datetime().optional(),
+  created_at: z.string().datetime()
+});
+export const EvolutionRollbackRecordSchema = z.object({
+  rollback_id: z.string(),
+  candidate_id: z.string(),
+  evolution_run_id: z.string(),
+  target_id: z.string(),
+  target_kind: EvolutionRunKindSchema,
+  previous_version: z.number().int(),
+  rolled_back_version: z.number().int(),
+  reason: z.string(),
+  rollback_evidence: z.array(z.string()).default([]),
+  created_at: z.string().datetime()
+});
+
+export const ClawHubRegistryConfigSchema = z.object({
+  config_id: z.string(),
+  registry_endpoint: z.string().url().optional(),
+  registry_name: z.string().default("default"),
+  auth_method: z.enum(["none", "api_key", "oauth2"]).default("none"),
+  api_key_ref: z.string().optional(),
+  oauth2_client_id: z.string().optional(),
+  sync_interval_seconds: z.number().int().positive().default(3600),
+  auto_sync_enabled: z.boolean().default(false),
+  trust_policy: z.object({
+    require_verified_publisher: z.boolean().default(true),
+    minimum_downloads: z.number().int().nonnegative().default(0),
+    allowed_tags: z.array(z.string()).default([]),
+    blocked_tags: z.array(z.string()).default([])
+  }).default({}),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime().optional()
+});
+
+export const ClawHubSearchResultSchema = z.object({
+  result_id: z.string(),
+  query: z.string(),
+  registry_name: z.string().default("default"),
+  skill_id: z.string(),
+  skill_name: z.string(),
+  description: z.string(),
+  publisher_id: z.string().optional(),
+  publisher_name: z.string().optional(),
+  version: z.string(),
+  download_count: z.number().int().nonnegative().default(0),
+  tags: z.array(z.string()).default([]),
+  compatibility_score: z.number().min(0).max(1).default(0),
+  verified: z.boolean().default(false),
+  openclaw_format: z.boolean().default(false),
+  created_at: z.string().datetime()
+});
+
+export const ClawHubInstallRecordSchema = z.object({
+  install_id: z.string(),
+  registry_name: z.string().default("default"),
+  remote_skill_id: z.string(),
+  remote_skill_name: z.string(),
+  remote_version: z.string(),
+  local_skill_id: z.string().optional(),
+  install_status: z.enum(["pending_review", "installed", "install_failed", "review_rejected"]).default("pending_review"),
+  trust_verdict_id: z.string().optional(),
+  governance_review_required: z.boolean().default(true),
+  installed_at: z.string().datetime().optional(),
+  installed_by: z.string().optional(),
+  created_at: z.string().datetime()
+});
+
+export const ClawHubPublishRecordSchema = z.object({
+  publish_id: z.string(),
+  registry_name: z.string().default("default"),
+  local_skill_id: z.string(),
+  local_skill_name: z.string(),
+  local_version: z.number().int(),
+  remote_skill_id: z.string().optional(),
+  publish_status: z.enum(["pending_approval", "published", "publish_failed", "revoked"]).default("pending_approval"),
+  governance_approved: z.boolean().default(false),
+  published_at: z.string().datetime().optional(),
+  published_by: z.string().optional(),
+  created_at: z.string().datetime()
+});
+
+export const ClawHubSyncRecordSchema = z.object({
+  sync_id: z.string(),
+  registry_name: z.string().default("default"),
+  sync_kind: z.enum(["full", "incremental", "metadata_only"]).default("incremental"),
+  sync_status: z.enum(["in_progress", "completed", "failed"]).default("in_progress"),
+  skills_synced: z.number().int().nonnegative().default(0),
+  skills_updated: z.number().int().nonnegative().default(0),
+  skills_added: z.number().int().nonnegative().default(0),
+  errors: z.array(z.string()).default([]),
+  started_at: z.string().datetime(),
+  completed_at: z.string().datetime().optional()
+});
+
+export const RemoteSkillTrustVerdictSchema = z.object({
+  verdict_id: z.string(),
+  remote_skill_id: z.string(),
+  registry_name: z.string().default("default"),
+  trust_level: z.enum(["untrusted", "conditional", "trusted"]).default("untrusted"),
+  verification_signals: z.array(z.string()).default([]),
+  compatibility_check: z.enum(["pending", "compatible", "incompatible", "unknown"]).default("pending"),
+  policy_compliant: z.boolean().default(false),
+  publisher_verified: z.boolean().default(false),
+  risk_assessment: z.string().optional(),
+  reviewed_by: z.string().optional(),
+  reviewed_at: z.string().datetime().optional(),
+  governance_review_required: z.boolean().default(true),
+  created_at: z.string().datetime()
 });
 
 export const TaskTemplateSchema = z.object({
@@ -1529,6 +1717,7 @@ export const AgentTeamSummarySchema = z.object({
   message_count: z.number().int().nonnegative().default(0),
   isolated_context_count: z.number().int().nonnegative().default(0),
   checkpoint_count: z.number().int().nonnegative().default(0),
+  dispatch_plan_id: z.string().optional(),
   future_upgrade_path: z.string().optional(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime()
@@ -1973,6 +2162,8 @@ export const WorkerSessionSchema = z.object({
   stall_detected_at: z.string().datetime().optional(),
   orphaned_detected_at: z.string().datetime().optional(),
   lease_id: z.string().optional(),
+  dispatch_lease_id: z.string().optional(),
+  dispatch_plan_id: z.string().optional(),
   supervision_policy: z.enum(["none", "restart_on_failure", "restart_on_stall", "restart_on_expiry"]).default("none"),
   created_at: z.string().datetime()
 });
@@ -2689,6 +2880,20 @@ export type GovernanceAlert = z.infer<typeof GovernanceAlertSchema>;
 export type GovernanceAlertFollowUp = z.infer<typeof GovernanceAlertFollowUpSchema>;
 export type InboxItem = z.infer<typeof InboxItemSchema>;
 export type InboxItemState = z.infer<typeof InboxItemStateSchema>;
+export type EvolutionRunKind = z.infer<typeof EvolutionRunKindSchema>;
+export type EvolutionRunStatus = z.infer<typeof EvolutionRunStatusSchema>;
+export type EvolutionCandidate = z.infer<typeof EvolutionCandidateSchema>;
+export type SkillEvolutionRun = z.infer<typeof SkillEvolutionRunSchema>;
+export type PromptEvolutionRun = z.infer<typeof PromptEvolutionRunSchema>;
+export type ToolDescriptionEvolutionRun = z.infer<typeof ToolDescriptionEvolutionRunSchema>;
+export type EvolutionPromotionDecision = z.infer<typeof EvolutionPromotionDecisionSchema>;
+export type EvolutionRollbackRecord = z.infer<typeof EvolutionRollbackRecordSchema>;
+export type ClawHubRegistryConfig = z.infer<typeof ClawHubRegistryConfigSchema>;
+export type ClawHubSearchResult = z.infer<typeof ClawHubSearchResultSchema>;
+export type ClawHubInstallRecord = z.infer<typeof ClawHubInstallRecordSchema>;
+export type ClawHubPublishRecord = z.infer<typeof ClawHubPublishRecordSchema>;
+export type ClawHubSyncRecord = z.infer<typeof ClawHubSyncRecordSchema>;
+export type RemoteSkillTrustVerdict = z.infer<typeof RemoteSkillTrustVerdictSchema>;
 export type TaskTemplate = z.infer<typeof TaskTemplateSchema>;
 export type Schedule = z.infer<typeof ScheduleSchema>;
 export type CapabilityKind = z.infer<typeof CapabilityKindSchema>;

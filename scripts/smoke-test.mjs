@@ -17,7 +17,7 @@ const localSkillPolicyFile = join(smokeDir, "skill-policy.local.json");
 const policyBundleFile = join(smokeDir, "policy-bundle.json");
 
 mkdirSync(workspaceDir, { recursive: true });
-writeFileSync(sampleFile, "apex smoke file\n", "utf8");
+writeFileSync(sampleFile, "company brain smoke file\n", "utf8");
 writeFileSync(
   globalSkillPolicyFile,
   JSON.stringify(
@@ -418,7 +418,7 @@ assert.ok((listed.result?.entries.length ?? 0) >= 1);
 
 const fileRead = readLocalFile(task.task_id, sampleFile);
 assert.equal(fileRead.status, "completed");
-assert.match(fileRead.result?.content ?? "", /apex smoke file/);
+assert.match(fileRead.result?.content ?? "", /company brain smoke file/);
 
 const writePath = join(workspaceDir, "generated-output.txt");
 const writeResult = writeLocalFile({
@@ -2845,6 +2845,338 @@ assert.ok(learnedPlaybookMatches[0].score > 0);
   assert.equal(workspaceSummary.tooling.compensations_failed >= 1, true);
   assert.equal(workspaceSummary.manual_attention.length >= 1, true);
 
+const settingsStatusResponse = await fetch(`http://127.0.0.1:${localControlPlanePort}/api/local/settings`);
+assert.equal(settingsStatusResponse.ok, true);
+const settingsStatus = await settingsStatusResponse.json();
+assert.ok(settingsStatus.effective.default_task_workdir);
+assert.ok(settingsStatus.effective.default_write_root);
+assert.ok(settingsStatus.effective.default_export_dir);
+assert.ok(settingsStatus.effective.verification_evidence_dir);
+assert.ok(settingsStatus.effective.task_run_dir);
+const newDirField = settingsStatus.fields.find(f => f.key === "default_task_workdir");
+assert.ok(newDirField);
+assert.equal(newDirField.editable, true);
+
+const delegationPolicyResponse = await fetch(`http://127.0.0.1:${localControlPlanePort}/api/local/settings/delegation-policy`);
+assert.equal(delegationPolicyResponse.ok, true);
+const delegationPolicy = await delegationPolicyResponse.json();
+assert.ok(delegationPolicy.policy);
+assert.ok(delegationPolicy.limits);
+assert.ok(delegationPolicy.machine);
+assert.equal(typeof delegationPolicy.policy.max_parallel_subagents, "number");
+assert.equal(typeof delegationPolicy.limits.effective_max_parallel, "number");
+
+const budgetPolicyResponse = await fetch(`http://127.0.0.1:${localControlPlanePort}/api/local/settings/budget-policy`);
+assert.equal(budgetPolicyResponse.ok, true);
+const budgetPolicy = await budgetPolicyResponse.json();
+assert.ok(budgetPolicy.policy);
+assert.ok(budgetPolicy.pricing);
+assert.equal(typeof budgetPolicy.policy.hard_limit_amount, "number");
+
+const acceptanceResponse = await fetch(`http://127.0.0.1:${localControlPlanePort}/api/local/acceptance/${task.task_id}`);
+assert.equal(acceptanceResponse.ok, true);
+const acceptanceData = await acceptanceResponse.json();
+assert.ok(acceptanceData.completion_path);
+assert.equal(typeof acceptanceData.completion_path.can_mark_done, "boolean");
+
+const budgetStatusResponse = await fetch(`http://127.0.0.1:${localControlPlanePort}/api/local/budget/${task.task_id}`);
+assert.equal(budgetStatusResponse.ok, true);
+const budgetData = await budgetStatusResponse.json();
+assert.ok(budgetData.status || budgetData.policy);
+if (budgetData.status) {
+  assert.equal(typeof budgetData.status.hard_limit, "number");
+  assert.equal(typeof budgetData.status.budget_exhausted, "boolean");
+}
+
+const dispatchPlanResponse = await fetch(`http://127.0.0.1:${localControlPlanePort}/api/local/dispatch-plans`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ task_id: task.task_id, steps: [{ goal: "test step" }] })
+});
+assert.equal(dispatchPlanResponse.ok, true);
+const dispatchPlan = await dispatchPlanResponse.json();
+assert.ok(dispatchPlan.plan);
+assert.ok(dispatchPlan.plan.plan_id);
+
+const { createDispatchLeaseForDelegation, releaseDispatchLeaseForSession } = await import("@apex/shared-runtime");
+
+const dispatchTestTaskId = `dispatch_test_${Date.now()}`;
+const leaseResult1 = createDispatchLeaseForDelegation({
+  task_id: dispatchTestTaskId,
+  supervisor_agent_id: "test_supervisor",
+  step_goal: "Test delegated execution step",
+  subagent_id: "test_subagent_1"
+});
+assert.ok(!("error" in leaseResult1), "Dispatch lease creation should succeed");
+assert.ok(leaseResult1.plan, "Lease result should have plan");
+assert.ok(leaseResult1.step, "Lease result should have step");
+assert.ok(leaseResult1.assignment, "Lease result should have assignment");
+assert.ok(leaseResult1.lease, "Lease result should have lease");
+assert.equal(leaseResult1.lease.status, "active", "Lease should be active");
+
+const duplicateLeaseResult = createDispatchLeaseForDelegation({
+  task_id: dispatchTestTaskId,
+  supervisor_agent_id: "test_supervisor",
+  step_goal: "Test second step",
+  subagent_id: "test_subagent_2"
+});
+if ("error" in duplicateLeaseResult) {
+  assert.ok(duplicateLeaseResult.error.includes("Max parallel"), `Second lease error should be about parallel limits, got: ${duplicateLeaseResult.error}`);
+} else {
+  assert.equal(duplicateLeaseResult.plan.plan_id, leaseResult1.plan.plan_id, "Should reuse same plan");
+}
+
+const { getContextEnvelopesForTask, getResultEnvelopesForTask } = await import("@apex/shared-runtime");
+const contextEnvelopes = getContextEnvelopesForTask(dispatchTestTaskId);
+assert.ok(contextEnvelopes.length >= 1, "Should have context envelopes for handoff");
+assert.equal(contextEnvelopes[0].step_goal, "Test delegated execution step", "Context envelope should have step goal");
+assert.ok(contextEnvelopes[0].policy_slice.max_parallel_subagents >= 1, "Context envelope should have policy slice");
+assert.ok(contextEnvelopes[0].definition_of_done.length > 0, "Context envelope should have DoD");
+
+const releaseResult = releaseDispatchLeaseForSession(leaseResult1.lease.lease_id, "completed");
+assert.ok(!("error" in releaseResult), "Lease release should succeed");
+assert.equal(releaseResult.status, "released", "Released lease should have released status");
+
+const resultEnvelopes = getResultEnvelopesForTask(dispatchTestTaskId);
+assert.ok(resultEnvelopes.length >= 1, "Should have result envelopes after release");
+assert.equal(resultEnvelopes[0].status, "completed", "Result envelope should be completed");
+
+const { createBudgetPolicy, trackModelSpend, getPendingInterruptionForTask, resolveBudgetInterruption, getBudgetStatusForTask, initializeDefaultPricingRegistry } = await import("@apex/shared-runtime");
+initializeDefaultPricingRegistry();
+const testBudgetTaskId = `budget_test_${Date.now()}`;
+const testPolicy = createBudgetPolicy({ task_id: testBudgetTaskId, hard_limit_amount: 0.01, on_limit_reached: "pause_and_ask" });
+const { initializeBudgetStatus } = await import("@apex/shared-runtime");
+initializeBudgetStatus(testBudgetTaskId, testPolicy.policy_id);
+const spendResult = trackModelSpend({
+  task_id: testBudgetTaskId,
+  provider: "openai",
+  model: "gpt-4o",
+  input_tokens: 500000,
+  output_tokens: 200000
+});
+const pendingInterruption = getPendingInterruptionForTask(testBudgetTaskId);
+assert.ok(pendingInterruption, "Budget interruption should be pending after exceeding limit");
+assert.equal(pendingInterruption.interruption_kind, "hard_stop", "Should be hard_stop interruption");
+assert.equal(pendingInterruption.user_decision, "pending", "Decision should be pending");
+
+const budgetStatusAfterPause = getBudgetStatusForTask(testBudgetTaskId);
+assert.ok(budgetStatusAfterPause.budget_exhausted, "Budget should be exhausted");
+
+const resolveResult = resolveBudgetInterruption({
+  event_id: pendingInterruption.event_id,
+  user_decision: "continue_with_new_limit",
+  new_limit: 10.0
+});
+assert.ok(!("error" in resolveResult), "Budget resolution should succeed");
+assert.equal(resolveResult.user_decision, "continue_with_new_limit", "Decision should be recorded");
+
+const budgetStatusAfterResume = getBudgetStatusForTask(testBudgetTaskId);
+assert.equal(budgetStatusAfterResume.hard_limit, 10.0, "Hard limit should be updated");
+assert.ok(!budgetStatusAfterResume.budget_exhausted, "Budget should no longer be exhausted");
+
+const noMorePending = getPendingInterruptionForTask(testBudgetTaskId);
+assert.ok(!noMorePending, "No more pending interruptions after resolution");
+
+const { listAcceptanceReviewsForTask, listAcceptanceVerdictsForTask, getCompletionPathStatus } = await import("@apex/shared-runtime");
+const acceptanceReviews = listAcceptanceReviewsForTask(task.task_id);
+assert.ok(acceptanceReviews.length >= 1, "Should have acceptance reviews after e2e run");
+const acceptanceVerdicts = listAcceptanceVerdictsForTask(task.task_id);
+assert.ok(acceptanceVerdicts.length >= 1, "Should have acceptance verdicts after e2e run");
+const completionPath = getCompletionPathStatus(task.task_id);
+assert.ok(completionPath.has_acceptance_review, "Should have acceptance review");
+assert.ok(completionPath.has_done_gate, "Should have done gate");
+
+const {
+  createSkillEvolutionRun,
+  addEvolutionCandidate,
+  gateEvolutionCandidate,
+  recordEvolutionPromotionDecision,
+  getEvolutionDiagnostics,
+  collectEvolutionSignals,
+  runEvolutionCycle,
+  buildEvolutionStatusPanelState
+} = await import("@apex/shared-runtime");
+
+const evoRun = createSkillEvolutionRun({
+  skill_id: "smoke_skill_001",
+  skill_name: "Smoke Test Skill",
+  trigger_signals: ["signal_1"],
+  budget_allocated_usd: 1.0
+});
+assert.ok(evoRun.run_id, "Evolution run should have run_id");
+assert.equal(evoRun.skill_id, "smoke_skill_001");
+assert.equal(evoRun.status, "candidate_generated");
+
+const evoCandidate = addEvolutionCandidate({
+  evolution_run_id: evoRun.run_id,
+  kind: "skill",
+  target_id: "smoke_skill_001",
+  target_name: "Smoke Test Skill",
+  proposed_change: "Improve error handling based on replay mismatch",
+  source_signals: ["signal_1"],
+  confidence: 0.85
+});
+assert.ok(!("error" in evoCandidate), "Candidate creation should succeed");
+assert.equal(evoCandidate.kind, "skill");
+assert.equal(evoCandidate.status, "candidate_generated");
+
+const gateResult = gateEvolutionCandidate({
+  candidate_id: evoCandidate.candidate_id,
+  replay_score_threshold: 0.6,
+  budget_remaining_usd: 5.0
+});
+assert.ok(!("error" in gateResult), "Gating should succeed");
+assert.equal(typeof gateResult.passed, "boolean");
+assert.equal(typeof gateResult.replay_score, "number");
+assert.ok(gateResult.gate_details.length > 0, "Gate should have details");
+
+const evoDiag = getEvolutionDiagnostics();
+assert.ok(evoDiag.total_candidates >= 1, "Should have at least one candidate");
+assert.ok(evoDiag.skill_runs >= 1, "Should have at least one skill run");
+
+const evoSignals = collectEvolutionSignals();
+assert.ok(Array.isArray(evoSignals), "Signals should be an array");
+
+const evoCycleResult = runEvolutionCycle();
+assert.ok(typeof evoCycleResult.signals_collected === "number");
+assert.ok(typeof evoCycleResult.candidates_generated === "number");
+
+const evoPanelState = buildEvolutionStatusPanelState();
+assert.ok(typeof evoPanelState.total_candidates === "number");
+assert.ok(Array.isArray(evoPanelState.recent_candidates));
+
+const evoDiagResponse = await fetch(`http://127.0.0.1:${localControlPlanePort}/api/local/evolution/diagnostics`);
+assert.equal(evoDiagResponse.ok, true);
+const evoDiagApi = await evoDiagResponse.json();
+assert.ok(typeof evoDiagApi.total_candidates === "number");
+
+const evoCycleResponse = await fetch(`http://127.0.0.1:${localControlPlanePort}/api/local/evolution/cycle`, { method: "POST" });
+assert.equal(evoCycleResponse.ok, true);
+const evoCycleApi = await evoCycleResponse.json();
+assert.ok(typeof evoCycleApi.signals_collected === "number");
+
+const evoPanelResponse = await fetch(`http://127.0.0.1:${localControlPlanePort}/api/local/evolution/workspace-panel`);
+assert.equal(evoPanelResponse.ok, true);
+const evoPanelApi = await evoPanelResponse.json();
+assert.ok(typeof evoPanelApi.total_candidates === "number");
+
+const {
+  createClawHubRegistryConfig,
+  searchClawHubSkills,
+  installClawHubSkill,
+  publishToClawHub,
+  syncClawHubRegistry,
+  assessRemoteSkillTrust,
+  getClawHubDiagnostics
+} = await import("@apex/shared-runtime");
+
+const clawhubConfig = createClawHubRegistryConfig({
+  registry_name: "smoke_test",
+  auth_method: "none"
+});
+assert.ok(clawhubConfig.config_id, "ClawHub config should have config_id");
+assert.equal(clawhubConfig.registry_name, "smoke_test");
+assert.equal(clawhubConfig.auth_method, "none");
+
+const searchResults = searchClawHubSkills({ query: "test", registry_name: "smoke_test" });
+assert.ok(Array.isArray(searchResults), "Search should return array");
+
+const installRecord = installClawHubSkill({
+  remote_skill_id: "remote_skill_001",
+  remote_skill_name: "Remote Test Skill",
+  remote_version: "1.0.0",
+  registry_name: "smoke_test"
+});
+assert.ok(installRecord.install_id, "Install should have install_id");
+assert.equal(installRecord.install_status, "pending_review");
+assert.equal(installRecord.governance_review_required, true);
+
+const publishRecord = publishToClawHub({
+  local_skill_id: "local_skill_001",
+  local_skill_name: "Local Test Skill",
+  local_version: 1,
+  registry_name: "smoke_test"
+});
+assert.ok(publishRecord.publish_id, "Publish should have publish_id");
+assert.equal(publishRecord.publish_status, "pending_approval");
+assert.equal(publishRecord.governance_approved, false);
+
+const syncRecord = syncClawHubRegistry({ registry_name: "smoke_test", sync_kind: "incremental" });
+assert.ok(syncRecord.sync_id, "Sync should have sync_id");
+assert.equal(syncRecord.sync_status, "failed");
+assert.ok(syncRecord.errors.length > 0, "Sync without endpoint should have errors");
+
+const trustVerdict = assessRemoteSkillTrust({
+  remote_skill_id: "remote_skill_001",
+  registry_name: "smoke_test",
+  publisher_verified: true,
+  compatibility_check: "compatible"
+});
+assert.ok(trustVerdict.verdict_id, "Trust verdict should have verdict_id");
+assert.equal(trustVerdict.trust_level, "trusted");
+assert.equal(trustVerdict.governance_review_required, true);
+
+const untrustedVerdict = assessRemoteSkillTrust({
+  remote_skill_id: "remote_skill_002",
+  registry_name: "smoke_test",
+  publisher_verified: false,
+  compatibility_check: "unknown"
+});
+assert.equal(untrustedVerdict.trust_level, "untrusted");
+assert.equal(untrustedVerdict.governance_review_required, true);
+
+const clawhubDiag = getClawHubDiagnostics();
+assert.ok(clawhubDiag.registry_configs >= 1, "Should have at least one config");
+assert.ok(clawhubDiag.install_records >= 1, "Should have at least one install");
+assert.ok(clawhubDiag.publish_records >= 1, "Should have at least one publish");
+assert.ok(clawhubDiag.trust_verdicts >= 2, "Should have at least two verdicts");
+
+const clawhubDiagResponse = await fetch(`http://127.0.0.1:${localControlPlanePort}/api/local/clawhub/diagnostics`);
+assert.equal(clawhubDiagResponse.ok, true);
+const clawhubDiagApi = await clawhubDiagResponse.json();
+assert.ok(typeof clawhubDiagApi.registry_configs === "number");
+
+const clawhubInstallsResponse = await fetch(`http://127.0.0.1:${localControlPlanePort}/api/local/clawhub/installs`);
+assert.equal(clawhubInstallsResponse.ok, true);
+
+const clawhubTrustVerdictsResponse = await fetch(`http://127.0.0.1:${localControlPlanePort}/api/local/clawhub/trust-verdicts`);
+assert.equal(clawhubTrustVerdictsResponse.ok, true);
+
+const {
+  buildRemoteSkillReviewPanelState
+} = await import("@apex/shared-runtime");
+
+const remoteReviewPanel = buildRemoteSkillReviewPanelState();
+assert.ok(typeof remoteReviewPanel.registry_configs === "number");
+assert.ok(typeof remoteReviewPanel.pending_installs === "number");
+assert.ok(Array.isArray(remoteReviewPanel.pending_reviews));
+assert.ok(Array.isArray(remoteReviewPanel.recent_verdicts));
+
+const remoteReviewPanelResponse = await fetch(`http://127.0.0.1:${localControlPlanePort}/api/local/clawhub/remote-skill-review-panel`);
+assert.equal(remoteReviewPanelResponse.ok, true);
+const remoteReviewPanelApi = await remoteReviewPanelResponse.json();
+assert.ok(typeof remoteReviewPanelApi.pending_installs === "number");
+
+const installApproveResponse = await fetch(`http://127.0.0.1:${localControlPlanePort}/api/local/clawhub/install/${installRecord.install_id}/approve`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ reviewed_by: "smoke_tester" })
+});
+assert.equal(installApproveResponse.ok, true);
+const approvedInstall = await installApproveResponse.json();
+assert.equal(approvedInstall.install_status, "installed");
+assert.equal(approvedInstall.installed_by, "smoke_tester");
+
+const publishApproveResponse = await fetch(`http://127.0.0.1:${localControlPlanePort}/api/local/clawhub/publish/${publishRecord.publish_id}/approve`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ reviewed_by: "smoke_tester" })
+});
+assert.equal(publishApproveResponse.ok, true);
+const approvedPublish = await publishApproveResponse.json();
+assert.equal(approvedPublish.publish_status, "published");
+assert.equal(approvedPublish.governance_approved, true);
+
 const schedule = createSchedule("Run weekly finance reconciliation", "0 9 * * 1", "finance", "scheduled");
 const triggered = triggerSchedule(schedule.schedule_id);
 assert.equal(triggered.schedule_id, schedule.schedule_id);
@@ -3024,7 +3356,51 @@ console.log(
       task_templates: taskTemplates.length,
       memory_items: [...store.memoryItems.values()].length,
       skill_candidates: [...store.skillCandidates.values()].length,
-      schedule_id: schedule.schedule_id
+      schedule_id: schedule.schedule_id,
+      post_contract_integration: {
+        settings_new_dir_fields: !!settingsStatus.effective.default_task_workdir,
+        delegation_policy_loaded: !!delegationPolicy.policy,
+        budget_policy_loaded: !!budgetPolicy.policy,
+        acceptance_completion_path: !!acceptanceData.completion_path,
+        budget_status_accessible: !!(budgetData.status || budgetData.policy),
+        dispatch_plan_created: !!dispatchPlan.plan
+      },
+      final_local_closure: {
+        dispatch_lease_created: !!leaseResult1.lease,
+        dispatch_lease_active: leaseResult1.lease?.status === "active",
+        plan_reused_or_limited: !("error" in duplicateLeaseResult) || (duplicateLeaseResult.error?.includes("Max parallel")),
+        context_envelopes_auto_created: contextEnvelopes.length >= 1,
+        result_envelope_auto_created: resultEnvelopes.length >= 1,
+        budget_pause_interruption: !!pendingInterruption,
+        budget_resume_after_raise: budgetStatusAfterResume.hard_limit === 10.0,
+        acceptance_gates_completion: completionPath.has_acceptance_review && completionPath.has_done_gate
+      },
+      hermes_clawhub: {
+        evolution_run_created: !!evoRun.run_id,
+        evolution_candidate_created: !("error" in evoCandidate),
+        evolution_gate_result_passed: typeof gateResult.passed === "boolean",
+        evolution_diagnostics_accessible: evoDiag.total_candidates >= 1,
+        evolution_cycle_ran: typeof evoCycleResult.signals_collected === "number",
+        evolution_panel_state_accessible: typeof evoPanelState.total_candidates === "number",
+        evolution_api_diagnostics: evoDiagResponse.ok,
+        evolution_api_cycle: evoCycleResponse.ok,
+        evolution_api_panel: evoPanelResponse.ok,
+        clawhub_config_created: !!clawhubConfig.config_id,
+        clawhub_install_pending_review: installRecord.install_status === "pending_review",
+        clawhub_publish_pending_approval: publishRecord.publish_status === "pending_approval",
+        clawhub_sync_failed_no_endpoint: syncRecord.sync_status === "failed",
+        clawhub_trust_verdict_trusted: trustVerdict.trust_level === "trusted",
+        clawhub_trust_verdict_untrusted: untrustedVerdict.trust_level === "untrusted",
+        clawhub_governance_always_required: trustVerdict.governance_review_required && untrustedVerdict.governance_review_required,
+        clawhub_diagnostics_accessible: clawhubDiag.registry_configs >= 1,
+        clawhub_api_diagnostics: clawhubDiagResponse.ok,
+        clawhub_api_installs: clawhubInstallsResponse.ok,
+        clawhub_api_trust_verdicts: clawhubTrustVerdictsResponse.ok,
+        remote_skill_review_panel_accessible: typeof remoteReviewPanel.registry_configs === "number",
+        remote_skill_review_api: remoteReviewPanelResponse.ok,
+        install_approved_via_governance: approvedInstall.install_status === "installed",
+        publish_approved_via_governance: approvedPublish.publish_status === "published"
+      }
     },
     null,
     2

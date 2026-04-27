@@ -27,3 +27,16 @@ export {
   type OTELCollectorConfig,
   loadOTELCollectorConfig
 } from "./infra-config.js";
+
+export {
+  EditableLocalAppSettingsSchema,
+  LocalAppSettingsSchema,
+  type EditableLocalAppSettings,
+  type LocalAppSettings,
+  resolveLocalAppSettingsPath,
+  resolveDefaultLocalDevRoot,
+  buildRecommendedLocalAppSettings,
+  loadLocalAppSettings,
+  saveLocalAppSettings,
+  resolveTaskDirectoryPaths
+} from "./local-app-settings.js";
