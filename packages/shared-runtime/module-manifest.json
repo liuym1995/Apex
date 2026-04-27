@@ -1,0 +1,251 @@
+{
+  "modules": [
+    {
+      "name": "core",
+      "file": "src/core.ts",
+      "responsibility": "Shared infrastructure: requireTask, recordAudit, touchTask, mirrorTaskContract, tokenizeForLearning, getExecutionTemplateKey, getLearningTokens, buildLearningFingerprint",
+      "public_vocabulary": ["requireTask", "recordAudit", "touchTask", "mirrorTaskContract"],
+      "internal_helpers": ["tokenizeForLearning", "getExecutionTemplateKey", "getLearningTokens", "buildLearningFingerprint"],
+      "depends_on": ["@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "capabilities",
+      "file": "src/capabilities.ts",
+      "responsibility": "Capability resolution: multi-dimensional scoring, catalog search, need inference, resolution, audit",
+      "public_vocabulary": ["listTaskCapabilityResolutions", "resolveTaskCapabilities", "getCapabilityScoreBreakdowns", "getCapabilityCatalog"],
+      "depends_on": ["core", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "security",
+      "file": "src/security.ts",
+      "responsibility": "Security signal detection, text sanitization, methodology text sanitization",
+      "public_vocabulary": ["detectObjectSecuritySignals", "detectTextSecuritySignals", "sanitizeMethodologyText"],
+      "depends_on": ["@apex/shared-types"]
+    },
+    {
+      "name": "skills",
+      "file": "src/skills.ts",
+      "responsibility": "Skill registry, importers, canonicalization",
+      "public_vocabulary": [],
+      "depends_on": ["@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "task-kernel",
+      "file": "src/index.ts [section: TASK_KERNEL]",
+      "responsibility": "Task runtime kernel: ExecutionPlan, DefinitionOfDone, Checkpoints, Artifacts, Heartbeat, pipeline orchestration (runTaskEndToEnd)",
+      "public_vocabulary": ["createExecutionPlan", "executeTask", "upsertDefinitionOfDone", "addCheckpoint", "listTaskCheckpoints", "addArtifact", "listTaskArtifacts", "sendHeartbeat", "runTaskEndToEnd"],
+      "depends_on": ["core", "capabilities", "verification", "execution-vocabulary", "memory", "learning", "event-sourcing"]
+    },
+    {
+      "name": "verification",
+      "file": "src/index.ts [section: VERIFICATION]",
+      "responsibility": "Verification coordinator: EvidenceGraph, Checklist, Reconciliation, Verifier, DoneGate, CompletionEngine",
+      "public_vocabulary": ["buildEvidenceGraph", "getEvidenceGraph", "addEvidenceNode", "updateEvidenceNode", "evaluateEvidenceGraph", "runChecklist", "runReconciliation", "runVerifier", "runDoneGate", "feedChecklistToEvidenceGraph", "feedReconciliationToEvidenceGraph", "feedVerifierToEvidenceGraph"],
+      "depends_on": ["core", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "memory",
+      "file": "src/index.ts [section: MEMORY]",
+      "responsibility": "Memory retrieval: MemoryDirectory, MemoryDocument, MemoryDocumentSection, search, promote, retire",
+      "public_vocabulary": ["createMemoryDirectory", "getMemoryDirectory", "listMemoryDirectories", "findMemoryDirectoryByKey", "createMemoryDocument", "getMemoryDocument", "listMemoryDocuments", "createMemoryDocumentSection", "listMemoryDocumentSections", "searchMemoryDocuments", "promoteMemoryDocument", "retireMemoryDocument"],
+      "depends_on": ["core", "security", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "learning",
+      "file": "src/index.ts [section: LEARNING]",
+      "responsibility": "Learning Factory: 8-stage pipeline, backlog, skill candidate, task template",
+      "public_vocabulary": ["createLearningFactoryPipeline", "getLearningFactoryPipeline", "listLearningFactoryPipelines", "advanceLearningFactoryStage", "failLearningFactoryStage", "rollbackLearningFactoryPipeline", "addCanaryResultToPipeline", "createLearningFactoryBacklogItem", "listLearningFactoryBacklog", "resolveLearningFactoryBacklogItem", "runLearningFactoryPipeline", "createSkillCandidate", "upsertTaskTemplate", "applyReuseImprovementFeedback"],
+      "depends_on": ["core", "capabilities", "security", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "event-sourcing",
+      "file": "src/index.ts [section: EVENT_SOURCING]",
+      "responsibility": "Event ledger, projections, outbox pattern",
+      "public_vocabulary": ["appendEvent", "getEventLedger", "getEventProjection", "listEventProjections", "getPendingOutboxEntries", "markOutboxEntrySent", "markOutboxEntryFailed", "replayEvents"],
+      "depends_on": ["core", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "policy",
+      "file": "src/index.ts [section: POLICY]",
+      "responsibility": "PDP/PEP policy architecture, egress rules engine",
+      "public_vocabulary": ["createPolicyRule", "listPolicyRules", "evaluatePolicy", "enforcePolicy", "listPolicyDecisions", "listPolicyEnforcementActions", "checkPolicyAndEnforce", "addEgressRule", "updateEgressRule", "listEgressRules", "removeEgressRule", "checkEgress", "approveEgressRequest", "listEgressAudits", "getEgressAuditStats", "initializeDefaultEgressRules"],
+      "depends_on": ["core", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "local-capability",
+      "file": "src/index.ts [section: LOCAL_CAPABILITY]",
+      "responsibility": "Local capability discovery layer",
+      "public_vocabulary": ["registerLocalCapability", "listLocalCapabilities", "discoverLocalCapabilities", "getLocalCapabilityAsDescriptor", "getLocalCapabilitiesAsDescriptors", "verifyLocalCapabilityAvailability"],
+      "depends_on": ["core", "capabilities", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "autonomous-completion",
+      "file": "src/index.ts [section: AUTONOMOUS_COMPLETION]",
+      "responsibility": "Autonomous completion contract: checkpoint, heartbeat, watchdog, Ralph Loop, Reviewer Loop",
+      "public_vocabulary": ["setAutonomousCompletionConfig", "getAutonomousCompletionConfig", "createCheckpoint", "getLatestCheckpoint", "listCheckpoints", "recordHeartbeat", "getLatestHeartbeat", "listHeartbeats", "checkWatchdog", "isHumanJudgmentBoundary", "recoverFromCheckpoint", "evaluateCompletionStatus", "startRalphLoop", "getRalphLoopState", "addReviewerExpectation", "listReviewerExpectations", "submitReviewerFeedback", "listReviewerFeedback", "evaluateAttempt", "advanceRalphLoop", "stopRalphLoop", "getRalphLoopSummary"],
+      "depends_on": ["core", "verification", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "observability",
+      "file": "src/index.ts [section: OBSERVABILITY]",
+      "responsibility": "Tracing, spans, cost breakdown, SLO metrics, operational metrics",
+      "public_vocabulary": ["startTrace", "createSpan", "endSpan", "addSpanEvent", "getTraceSpans", "getSpanTree", "endTrace", "getRunTimeline", "recordCostBreakdown", "getCostBreakdown", "recordSLOMetric", "getSLOMetrics", "computeTaskSLOs", "computeOperationalMetrics", "getOperationalMetrics", "listOperationalMetrics"],
+      "depends_on": ["core", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "cqs",
+      "file": "src/index.ts [section: CQS]",
+      "responsibility": "Command-Query-Separation: dispatch, query, event recording",
+      "public_vocabulary": ["dispatchCommand", "executeQuery", "listCQSCommands", "listCQSQueries", "listCQSEvents"],
+      "depends_on": ["core", "event-sourcing", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "experiment",
+      "file": "src/index.ts [section: EXPERIMENT]",
+      "responsibility": "Experiment run: candidates, budgets, winner selection",
+      "public_vocabulary": ["createExperimentRun", "getExperimentRun", "listExperimentRuns", "addExperimentCandidate", "startExperimentRun", "recordExperimentCandidateResult", "failExperimentCandidate", "completeExperimentRun", "cancelExperimentRun"],
+      "depends_on": ["core", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "sandbox",
+      "file": "src/index.ts [section: SANDBOX]",
+      "responsibility": "Sandbox manifest, capability tokens, quota enforcement, task control commands",
+      "public_vocabulary": ["createSandboxManifest", "getSandboxManifest", "getSandboxManifestsForTask", "issueCapabilityToken", "revokeCapabilityToken", "checkSandboxQuota", "recordSandboxUsage", "revokeSandboxManifest", "issueTaskControlCommand", "listTaskControlCommands", "resumeFromInterrupt"],
+      "depends_on": ["core", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "lineage",
+      "file": "src/index.ts [section: LINEAGE]",
+      "responsibility": "Method lineage: version tracking, evaluation, diff",
+      "public_vocabulary": ["createMethodLineage", "getMethodLineage", "getActiveLineageForAsset", "getLineageHistory", "getLineageChain", "recordLineageEvaluation", "listMethodLineages"],
+      "depends_on": ["core", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "replay",
+      "file": "src/index.ts [section: REPLAY]",
+      "responsibility": "Replay package: event capture, state snapshot, annotations",
+      "public_vocabulary": ["createReplayPackage", "getReplayPackage", "listReplayPackages", "getReplayPackageEvents", "addReplayAnnotation", "captureReplayStateSnapshot"],
+      "depends_on": ["core", "cqs", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "model-gateway",
+      "file": "src/index.ts [section: MODEL_GATEWAY]",
+      "responsibility": "Model gateway: provider-neutral routing, privacy levels, structured output, retry/backoff",
+      "public_vocabulary": ["createModelRoute", "getModelRoute", "listModelRoutes", "resolveModelRoute", "recordModelRequest", "listModelRequests", "getModelCostSummary"],
+      "depends_on": ["core", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "automation",
+      "file": "src/index.ts [section: AUTOMATION]",
+      "responsibility": "Automation service: scheduling, trigger production, dedup, missed trigger recovery, recursion policy",
+      "public_vocabulary": ["createAutomationDefinition", "getAutomationDefinition", "listAutomationDefinitions", "checkAutomationDedup", "checkAutomationRecursion", "triggerAutomation", "detectMissedTriggers", "listAutomationTriggerRecords"],
+      "depends_on": ["core", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "knowledge",
+      "file": "src/index.ts [section: KNOWLEDGE]",
+      "responsibility": "Compiled knowledge wiki: page types, compilation, search",
+      "public_vocabulary": ["createWikiPage", "getWikiPage", "listWikiPages", "updateWikiPage", "compileWiki", "searchWikiPages"],
+      "depends_on": ["core", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "execution-vocabulary",
+      "file": "src/index.ts [section: EXECUTION_VOCABULARY]",
+      "responsibility": "Stable public runtime vocabulary: ExecutionStep, TaskRun, TaskAttempt, WorkerSession, SandboxLease",
+      "public_vocabulary": ["createExecutionStep", "startExecutionStep", "completeExecutionStep", "failExecutionStep", "skipExecutionStep", "retryExecutionStep", "linkStepEvidence", "getExecutionStep", "listExecutionSteps", "getExecutionStepTree", "createTaskRun", "startTaskRun", "completeTaskRun", "failTaskRun", "getTaskRun", "listTaskRuns", "createTaskAttempt", "startTaskAttempt", "completeTaskAttempt", "failTaskAttempt", "getTaskAttempt", "listTaskAttempts", "createWorkerSession", "heartbeatWorkerSession", "terminateWorkerSession", "getWorkerSession", "listWorkerSessions", "createSandboxLease", "releaseSandboxLease", "revokeSandboxLease", "getSandboxLease", "listSandboxLeases"],
+      "depends_on": ["core", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "harness",
+      "file": "src/index.ts [section: HARNESS]",
+      "responsibility": "Execution harness: verification harness for high-risk tool calls with evidence graph integration",
+      "public_vocabulary": ["createExecutionHarness", "runExecutionHarness", "timeoutExecutionHarness", "rollbackExecutionHarness", "getExecutionHarness", "listExecutionHarnesses"],
+      "depends_on": ["core", "verification", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "feedback",
+      "file": "src/index.ts [section: FEEDBACK]",
+      "responsibility": "Reuse feedback: accept/ignore/prefer/reject/approve with stats",
+      "public_vocabulary": ["submitReuseFeedback", "listReuseFeedbacks", "getReuseFeedbackStats"],
+      "depends_on": ["core", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "egress-middleware",
+      "file": "src/index.ts [section: EGRESS_MIDDLEWARE]",
+      "responsibility": "Egress-aware HTTP client middleware",
+      "public_vocabulary": ["egressAwareFetch"],
+      "depends_on": ["core", "policy", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "scheduler",
+      "file": "src/index.ts [section: SCHEDULER]",
+      "responsibility": "Persistent scheduler with cron expressions, checkpoint snapshots",
+      "public_vocabulary": ["parseCronField", "getNextCronTime", "createScheduledJob", "updateScheduledJob", "triggerScheduledJob", "getDueScheduledJobs", "getScheduledJob", "listScheduledJobs", "deleteScheduledJob", "createCheckpointSnapshot", "restoreFromCheckpoint", "getCheckpointSnapshot", "listCheckpointSnapshots"],
+      "depends_on": ["core", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "integration",
+      "file": "src/index.ts [section: INTEGRATION]",
+      "responsibility": "Cross-module integration: experiment-learning factory, wiki-memory document",
+      "public_vocabulary": ["promoteExperimentWinnerToLearningFactory", "triggerExperimentFromLowConfidence", "linkWikiToMemoryDocument", "unlinkWikiFromMemoryDocument", "getLinkedWikiPages", "getLinkedMemoryDocuments"],
+      "depends_on": ["core", "experiment", "learning", "knowledge", "memory", "lineage", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "event-subscription",
+      "file": "src/index.ts [section: EVENT_SUBSCRIPTION]",
+      "responsibility": "Event subscription, SLO alerting, SLO evaluation",
+      "public_vocabulary": ["createEventSubscription", "notifyEventSubscribers", "getEventSubscription", "listEventSubscriptions", "deleteEventSubscription", "createSLOAlert", "acknowledgeSLOAlert", "listSLOAlerts", "evaluateSLOs"],
+      "depends_on": ["core", "policy", "observability", "@apex/shared-state", "@apex/shared-types"]
+    },
+    {
+      "name": "computer-use-runtime",
+      "file": "src/computer-use-runtime.ts",
+      "responsibility": "Computer Use Runtime: screenshot capture, UI perception (accessibility tree, OCR), mouse/keyboard executor, see-act-verify-recover loop, human takeover/stop/replay, circuit breaker resilience",
+      "public_vocabulary": ["captureScreen", "buildAccessibilityTree", "perceiveScreen", "executeInputAction", "executeElementAction", "resolveElementAction", "createComputerUseSession", "getComputerUseSession", "listComputerUseSessions", "pauseComputerUseSession", "resumeComputerUseSession", "stopComputerUseSession", "completeComputerUseSession", "initiateHumanTakeover", "resolveHumanTakeover", "listHumanTakeovers", "runSeeActVerifyRecoverLoop", "listComputerUseSteps", "getComputerUseStep", "buildComputerUseReplayPackage", "replayComputerUseStep", "listScreenCaptures", "getScreenCapture", "listUIPerceptions", "getUIPerception", "listInputActions", "getInputAction", "resetCircuitBreakers", "getCircuitBreakerStatus", "registerOCRProvider", "listOCRProviders", "clearOCRProviders", "registerElementActionProvider", "listElementActionProviders", "clearElementActionProviders"],
+      "depends_on": ["@apex/shared-observability", "@apex/shared-state", "@apex/shared-types"]
+    }
+  ],
+  "stable_public_vocabulary": [
+    "TaskRun",
+    "TaskAttempt",
+    "WorkerSession",
+    "SandboxLease",
+    "ExecutionStep",
+    "VerificationRun"
+  ],
+  "transitional_internal_plumbing": [
+    "SubagentSession",
+    "SubagentCheckpoint",
+    "SubagentMessage",
+    "SubagentRuntimeBinding",
+    "SubagentRuntimeAdapterRun",
+    "SubagentRuntimeRunnerBackendLease",
+    "SubagentRuntimeBackendExecution",
+    "SubagentRuntimeDriverRun",
+    "SubagentRuntimeRunnerHandle",
+    "SubagentRuntimeRunnerExecution",
+    "SubagentRuntimeRunnerJob",
+    "SubagentRuntimeLauncherBackendAdapterCatalogEntry",
+    "SubagentRuntimeLauncherBackendAdapterStatus",
+    "SubagentRuntimeRunnerBackendAdapterCatalogEntry",
+    "SubagentRuntimeRunnerBackendAdapterStatus",
+    "SubagentRuntimeInstance",
+    "SubagentRuntimeLaunchReceipt",
+    "SubagentRuntimeLaunchSpec",
+    "SubagentResumePackage",
+    "SubagentResumeRequest"
+  ],
+  "dependency_rules": [
+    "core has no runtime module dependencies (only shared-state and shared-types)",
+    "capabilities depends on core only",
+    "security has no runtime module dependencies",
+    "task-kernel depends on core, capabilities, verification, execution-vocabulary, memory, learning, event-sourcing",
+    "verification depends on core only",
+    "memory depends on core and security only",
+    "learning depends on core, capabilities, and security only",
+    "execution-vocabulary depends on core only",
+    "policy depends on core only",
+    "No module may directly mutate another module's store entries",
+    "Cross-module communication must go through typed function calls, not direct state access"
+  ]
+}

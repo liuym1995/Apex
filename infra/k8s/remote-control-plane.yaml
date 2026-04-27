@@ -1,0 +1,167 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apex
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rcp-config
+  namespace: apex
+data:
+  NODE_ENV: "production"
+  PORT: "3020"
+  HOST: "0.0.0.0"
+  JWT_ISSUER: "apex-rcp"
+  JWT_AUDIENCE: "apex-services"
+  CORS_ORIGINS: "*"
+  RATE_LIMIT_MAX: "100"
+  RATE_LIMIT_WINDOW_MS: "60000"
+  OTEL_SERVICE_NAME: "remote-control-plane"
+  SYNC_ENABLED: "true"
+  SYNC_INTERVAL_MS: "30000"
+  FLEET_HEARTBEAT_TIMEOUT_MS: "60000"
+  LOG_LEVEL: "info"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+  LOCAL_CONTROL_PLANE_URL: "http://local-control-plane:3010"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: remote-control-plane
+  namespace: apex
+  labels:
+    app: remote-control-plane
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: remote-control-plane
+  template:
+    metadata:
+      labels:
+        app: remote-control-plane
+    spec:
+      containers:
+        - name: remote-control-plane
+          image: apex/remote-control-plane:0.1.0
+          ports:
+            - containerPort: 3020
+          envFrom:
+            - configMapRef:
+                name: rcp-config
+            - secretRef:
+                name: rcp-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3020
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3020
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rcp-secrets
+  namespace: apex
+type: Opaque
+stringData:
+  JWT_SECRET: "CHANGE-ME-IN-PRODUCTION"
+  DATABASE_URL: "http://libsql:8080"
+  DATABASE_AUTH_TOKEN: ""
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: remote-control-plane
+  namespace: apex
+spec:
+  selector:
+    app: remote-control-plane
+  ports:
+    - port: 3020
+      targetPort: 3020
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: libsql
+  namespace: apex
+  labels:
+    app: libsql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: libsql
+  template:
+    metadata:
+      labels:
+        app: libsql
+    spec:
+      containers:
+        - name: libsql
+          image: ghcr.io/tursodatabase/libsql-server:latest
+          ports:
+            - containerPort: 8080
+            - containerPort: 5001
+          env:
+            - name: SQLD_DB_PATH
+              value: "/var/lib/sqld/data"
+          volumeMounts:
+            - name: libsql-data
+              mountPath: /var/lib/sqld/data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+      volumes:
+        - name: libsql-data
+          persistentVolumeClaim:
+            claimName: libsql-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: libsql-pvc
+  namespace: apex
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: libsql
+  namespace: apex
+spec:
+  selector:
+    app: libsql
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+    - name: ws
+      port: 5001
+      targetPort: 5001
+  type: ClusterIP

@@ -1,0 +1,19 @@
+{
+  "name": "@apex/local-control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "node --max-old-space-size=32768 ../../node_modules/typescript/bin/tsc -p tsconfig.json",
+    "typecheck": "node --max-old-space-size=32768 ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@apex/shared-config": "0.1.0",
+    "@apex/shared-local-core": "0.1.0",
+    "@apex/shared-observability": "0.1.0",
+    "@apex/shared-runtime": "0.1.0",
+    "@apex/shared-state": "0.1.0",
+    "fastify": "^5.3.3"
+  }
+}

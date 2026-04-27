@@ -1,0 +1,39 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "baseUrl": ".",
+    "paths": {
+      "@apex/shared-auth": [
+        "packages/shared-auth/src/index.ts"
+      ],
+      "@apex/shared-config": [
+        "packages/shared-config/src/index.ts"
+      ],
+      "@apex/shared-local-core": [
+        "packages/shared-local-core/src/index.ts"
+      ],
+      "@apex/shared-observability": [
+        "packages/shared-observability/src/index.ts"
+      ],
+      "@apex/shared-runtime": [
+        "packages/shared-runtime/src/index.ts"
+      ],
+      "@apex/shared-state": [
+        "packages/shared-state/src/index.ts"
+      ],
+      "@apex/shared-types": [
+        "packages/shared-types/src/index.ts"
+      ]
+    },
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "sourceMap": true
+  }
+}

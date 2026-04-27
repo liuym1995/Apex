@@ -1,0 +1,50 @@
+{
+  "name": "apex-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "node --max-old-space-size=4096 scripts/run-workspaces.mjs build",
+    "check": "node --max-old-space-size=4096 scripts/run-workspaces.mjs typecheck",
+    "smoke": "node --max-old-space-size=12288 scripts/smoke-test.mjs",
+    "setup:rust:local": "node scripts/setup-rust-windows.mjs",
+    "setup:playwright:local": "node scripts/setup-playwright-local.mjs",
+    "setup:node:portable": "node scripts/setup-node-portable.mjs",
+    "generate:desktop-icons": "powershell -ExecutionPolicy Bypass -File scripts/generate-tauri-icons.ps1",
+    "register:desktop-protocol": "powershell -ExecutionPolicy Bypass -File scripts/register-apex-protocol.ps1",
+    "unregister:desktop-protocol": "powershell -ExecutionPolicy Bypass -File scripts/unregister-apex-protocol.ps1",
+    "launch:desktop-link": "powershell -ExecutionPolicy Bypass -File scripts/launch-apex-link.ps1",
+    "prepare:portable-node": "node scripts/prepare-portable-node.mjs",
+    "prepare:tauri-companion": "node scripts/prepare-tauri-companion.mjs",
+    "prepare:tauri-build": "node scripts/prepare-tauri-build.mjs",
+    "tauri:fetch": "node scripts/cargo-cli.mjs fetch",
+    "bundle:desktop": "npm run bundle -w @apex/desktop-shell",
+    "dev:desktop-supervisor": "node scripts/desktop-dev-supervisor.mjs",
+    "tauri:info": "node scripts/tauri-cli.mjs info",
+    "tauri:dev": "node scripts/tauri-cli.mjs dev",
+    "tauri:build": "node scripts/tauri-cli.mjs build",
+    "tauri:release": "node scripts/tauri-release.mjs",
+    "dev:desktop": "npm run dev -w @apex/desktop-shell",
+    "dev:local": "npm run dev -w @apex/local-control-plane",
+    "dev:gateway": "npm run dev -w @apex/gateway-service",
+    "dev:workflow": "npm run dev -w @apex/workflow-service",
+    "dev:manager": "npm run dev -w @apex/manager-service",
+    "dev:verification": "npm run dev -w @apex/verification-service",
+    "dev:memory": "npm run dev -w @apex/memory-service",
+    "dev:audit": "npm run dev -w @apex/audit-cost-service",
+    "dev:tools": "npm run dev -w @apex/tool-gateway-service",
+    "dev:workers": "npm run dev -w @apex/worker-adapter-service"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@vitejs/plugin-react": "^4.4.1",
+    "get-tsconfig": "^4.10.1",
+    "tsx": "4.19.3",
+    "typescript": "^5.8.3",
+    "vite": "^6.4.2"
+  }
+}

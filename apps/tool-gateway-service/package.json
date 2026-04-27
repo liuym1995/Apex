@@ -1,0 +1,17 @@
+{
+  "name": "@apex/tool-gateway-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "node --max-old-space-size=8192 ../../node_modules/typescript/bin/tsc -p tsconfig.json",
+    "typecheck": "node --max-old-space-size=8192 ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@apex/shared-config": "0.1.0",
+    "@apex/shared-observability": "0.1.0",
+    "@apex/shared-runtime": "0.1.0",
+    "fastify": "^5.3.3"
+  }
+}

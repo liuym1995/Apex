@@ -1,0 +1,84 @@
+version: "3.9"
+
+services:
+  remote-control-plane:
+    build:
+      context: ../..
+      dockerfile: infra/docker/remote-control-plane/Dockerfile
+    container_name: apex-rcp
+    ports:
+      - "3020:3020"
+    environment:
+      - NODE_ENV=production
+      - PORT=3020
+      - HOST=0.0.0.0
+      - DATABASE_URL=${DATABASE_URL:-http://libsql:8080}
+      - DATABASE_AUTH_TOKEN=${DATABASE_AUTH_TOKEN:-}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - JWT_ISSUER=apex-rcp
+      - JWT_AUDIENCE=apex-services
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - RATE_LIMIT_MAX=100
+      - RATE_LIMIT_WINDOW_MS=60000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=remote-control-plane
+      - LOCAL_CONTROL_PLANE_URL=http://host.docker.internal:3010
+      - SYNC_ENABLED=${SYNC_ENABLED:-false}
+      - SYNC_INTERVAL_MS=30000
+      - FLEET_HEARTBEAT_TIMEOUT_MS=60000
+      - LOG_LEVEL=info
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3020/health').then(r => r.json()).then(j => j.status === 'ok' ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - apex-net
+
+  libsql:
+    image: ghcr.io/tursodatabase/libsql-server:latest
+    container_name: apex-libsql
+    ports:
+      - "8080:8080"
+      - "5001:5001"
+    environment:
+      - SQLD_DB_PATH=/var/lib/sqld/data
+    volumes:
+      - libsql-data:/var/lib/sqld/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - apex-net
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    container_name: apex-otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ../otel/collector-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "8889:8889"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:13133/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - apex-net
+
+networks:
+  apex-net:
+    driver: bridge
+
+volumes:
+  libsql-data:
